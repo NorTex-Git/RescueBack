@@ -461,6 +461,20 @@ def manager_switch_focus():
     """POST /api/mqtt-alerts/manager/switch-focus - Cambiar alerta en foco de un manager (actualiza cache WhatsApp)"""
     return mqtt_alert_controller.manager_switch_focus()
 
+# Rutas para mensajes asociados a alertas (auditoría + resumen)
+from controllers.alert_message_controller import AlertMessageController
+alert_message_controller = AlertMessageController()
+
+@mqtt_alert_bp.route('/<alert_id>/messages', methods=['POST'])
+def log_alert_message(alert_id):
+    """POST /api/mqtt-alerts/<alert_id>/messages - Registrar mensaje de la conversación (in/out)"""
+    return alert_message_controller.log_message(alert_id)
+
+@mqtt_alert_bp.route('/<alert_id>/messages', methods=['GET'])
+def list_alert_messages(alert_id):
+    """GET /api/mqtt-alerts/<alert_id>/messages?direction=in&limit=15 - Listar mensajes de la alerta"""
+    return alert_message_controller.list_messages(alert_id)
+
 # ========== BLUEPRINT DE BÚSQUEDA POR TELÉFONO ==========
 from controllers.phone_lookup_controller import PhoneLookupController
 phone_lookup_bp = Blueprint('phone_lookup', __name__, url_prefix='/api/phone-lookup')

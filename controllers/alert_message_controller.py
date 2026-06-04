@@ -40,7 +40,8 @@ class AlertMessageController:
                 payload=data.get('payload', {}),
                 user_id=data.get('user_id'),
                 user_name=data.get('user_name'),
-                is_template=bool(data.get('is_template', False))
+                is_template=bool(data.get('is_template', False)),
+                is_navigation=bool(data.get('is_navigation', False))
             )
             created = self.repo.create(message)
             return jsonify({'success': True, 'message': created.to_json()}), 201
@@ -65,12 +66,14 @@ class AlertMessageController:
             limit = max(1, min(limit, 100))
 
             include_templates = (request.args.get('include_templates') or '').lower() == 'true'
+            include_navigation = (request.args.get('include_navigation') or '').lower() == 'true'
 
             messages = self.repo.find_by_alert(
                 alert_id=alert._id,
                 direction=direction,
                 limit=limit,
-                include_templates=include_templates
+                include_templates=include_templates,
+                include_navigation=include_navigation
             )
             return jsonify({
                 'success': True,

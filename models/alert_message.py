@@ -10,7 +10,7 @@ class AlertMessage:
 
     def __init__(self, alert_id=None, phone=None, direction=None, type=None,
                  body=None, payload=None, user_id=None, user_name=None,
-                 is_template=False, fecha=None, _id=None):
+                 is_template=False, is_navigation=False, fecha=None, _id=None):
         self._id = _id or ObjectId()
         self.alert_id = alert_id
         self.phone = phone
@@ -21,6 +21,7 @@ class AlertMessage:
         self.user_id = user_id
         self.user_name = user_name
         self.is_template = bool(is_template)
+        self.is_navigation = bool(is_navigation)
         self.fecha = fecha or datetime.utcnow()
 
     def to_dict(self):
@@ -35,6 +36,7 @@ class AlertMessage:
             'user_id': self.user_id,
             'user_name': self.user_name,
             'is_template': self.is_template,
+            'is_navigation': self.is_navigation,
             'fecha': self.fecha
         }
 
@@ -50,6 +52,7 @@ class AlertMessage:
             'user_id': self.user_id,
             'user_name': self.user_name,
             'is_template': self.is_template,
+            'is_navigation': self.is_navigation,
             'fecha': self.fecha.isoformat() if isinstance(self.fecha, datetime) else self.fecha
         }
 
@@ -68,5 +71,6 @@ class AlertMessage:
             user_id=data.get('user_id'),
             user_name=data.get('user_name'),
             is_template=bool(data.get('is_template', False)),
+            is_navigation=bool(data.get('is_navigation', False)),
             fecha=data.get('fecha')
         )

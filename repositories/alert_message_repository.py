@@ -30,13 +30,15 @@ class AlertMessageRepository:
         self.collection.insert_one(message.to_dict())
         return message
 
-    def find_by_alert(self, alert_id, direction=None, limit=15, include_templates=False):
+    def find_by_alert(self, alert_id, direction=None, limit=15, include_templates=False, include_navigation=False):
         """Devuelve los últimos `limit` mensajes ordenados por fecha asc para mostrar al usuario."""
         query = {'alert_id': self._coerce_alert_id(alert_id)}
         if direction in (AlertMessage.DIRECTION_IN, AlertMessage.DIRECTION_OUT):
             query['direction'] = direction
         if not include_templates:
             query['is_template'] = {'$ne': True}
+        if not include_navigation:
+            query['is_navigation'] = {'$ne': True}
         cursor = self.collection.find(query).sort('fecha', -1).limit(limit)
         docs = list(cursor)
         docs.reverse()  # cronologico ascendente para mostrar

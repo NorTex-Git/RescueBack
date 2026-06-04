@@ -60,7 +60,8 @@ class PhoneLookupService:
                 (
                     {
                         'nombre': entry.get('nombre'),
-                        'is_creator': bool(entry.get('is_creator', False))
+                        'is_creator': bool(entry.get('is_creator', False)),
+                        'is_alert_manager': bool(entry.get('is_alert_manager', False))
                     }
                     for entry in (empresa.roles or [])
                     if isinstance(entry, dict)

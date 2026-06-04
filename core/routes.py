@@ -450,6 +450,17 @@ def get_alert_details_for_user():
     """POST /api/mqtt-alerts/user-alert/details - Obtener detalles de una alerta si el usuario tiene acceso (SIN AUTENTICACIÓN)"""
     return mqtt_alert_controller.get_alert_details_for_user()
 
+# Rutas para Alert Managers (SIN AUTENTICACIÓN - usadas por WhatsApp/MqttConnection)
+@mqtt_alert_bp.route('/manager/active-by-sede', methods=['POST'])
+def manager_list_active_by_sede():
+    """POST /api/mqtt-alerts/manager/active-by-sede - Listar última alerta activa por sede para manager"""
+    return mqtt_alert_controller.manager_list_active_by_sede()
+
+@mqtt_alert_bp.route('/manager/switch-focus', methods=['POST'])
+def manager_switch_focus():
+    """POST /api/mqtt-alerts/manager/switch-focus - Cambiar alerta en foco de un manager (actualiza cache WhatsApp)"""
+    return mqtt_alert_controller.manager_switch_focus()
+
 # ========== BLUEPRINT DE BÚSQUEDA POR TELÉFONO ==========
 from controllers.phone_lookup_controller import PhoneLookupController
 phone_lookup_bp = Blueprint('phone_lookup', __name__, url_prefix='/api/phone-lookup')

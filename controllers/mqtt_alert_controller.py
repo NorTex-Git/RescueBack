@@ -14,21 +14,45 @@ class MqttAlertController:
         self.service = MqttAlertService()
         self.hardware_auth_service = HardwareAuthService()
 
-    def _notify_mqtt_fanout(self, alert_data: dict) -> None:
+    def _notify_mqtt_fanout(self, alert_data: dict, alert_managers: list = None) -> None:
         """Notificar a MqttConnection para fanout MQTT - fire and forget en hilo separado"""
         import threading
         import requests as _requests
         import logging as _logging
         from core.config import Config
 
+        payload = {
+            'alert': alert_data,
+            'alert_managers': alert_managers or []
+        }
+
         def _fire():
             try:
                 url = f"{Config.MQTT_SERVICE_URL}/internal/fanout-alert"
-                _requests.post(url, json=alert_data, timeout=5)
+                _requests.post(url, json=payload, timeout=5)
             except Exception as e:
                 _logging.getLogger(__name__).warning("Fanout MQTT no disponible: %s", e)
 
         threading.Thread(target=_fire, daemon=True).start()
+
+    def _build_alert_managers_payload(self, empresa_nombre: str) -> list:
+        """Construye payload de managers para fanout (telefonos de usuarios is_alert_manager de toda la empresa)"""
+        try:
+            managers = self.service.alert_repo.get_alert_managers_by_empresa(empresa_nombre)
+            payload = []
+            for usr in managers:
+                if not usr.get('telefono'):
+                    continue
+                payload.append({
+                    'numero': usr.get('telefono'),
+                    'nombre': usr.get('nombre', ''),
+                    'usuario_id': str(usr.get('_id')),
+                    'sede': usr.get('sede', ''),
+                    'rol': usr.get('rol_detalle')
+                })
+            return payload
+        except Exception:
+            return []
 
     def _extract_tipo_alerta_identifiers(self, raw_tipo_alerta):
         """Extrae identificadores válidos desde el payload recibido."""
@@ -1369,7 +1393,8 @@ class MqttAlertController:
             created_alert = self.service.alert_repo.create_alert(alert)
 
             # Fanout MQTT: notificar a MqttConnection via HTTP interno (fire-and-forget)
-            self._notify_mqtt_fanout(created_alert.to_json())
+            alert_managers_payload = self._build_alert_managers_payload(empresa.nombre)
+            self._notify_mqtt_fanout(created_alert.to_json(), alert_managers_payload)
 
             # Respuesta exitosa unificada
             return jsonify({
@@ -1741,7 +1766,142 @@ class MqttAlertController:
             import traceback
             traceback.print_exc()
             return jsonify({
-                'success': False, 
+                'success': False,
                 'error': 'Error interno del servidor',
                 'message': str(e)
             }), 500
+
+    def manager_list_active_by_sede(self):
+        """Lista la última alerta activa por sede para un manager.
+
+        Body JSON: { telefono: str } o { usuario_id: str }
+        Identifica empresa del manager, verifica rol is_alert_manager, devuelve agregado.
+        """
+        try:
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Formato inválido', 'message': 'JSON requerido'}), 400
+            data = request.get_json() or {}
+            telefono = (data.get('telefono') or '').strip()
+            usuario_id = (data.get('usuario_id') or '').strip()
+            if not telefono and not usuario_id:
+                return jsonify({'success': False, 'error': 'telefono o usuario_id requerido'}), 400
+
+            from repositories.usuario_repository import UsuarioRepository
+            from repositories.empresa_repository import EmpresaRepository
+            usuario_repo = UsuarioRepository()
+            empresa_repo = EmpresaRepository()
+
+            usuario = None
+            if usuario_id:
+                try:
+                    usuario = usuario_repo.find_by_id(usuario_id)
+                except Exception:
+                    usuario = None
+            if not usuario and telefono:
+                usuario = usuario_repo.find_by_telefono_global(telefono)
+
+            if not usuario:
+                return jsonify({'success': False, 'error': 'Usuario no encontrado'}), 404
+
+            empresa = empresa_repo.find_by_id(usuario.empresa_id)
+            if not empresa:
+                return jsonify({'success': False, 'error': 'Empresa del usuario no encontrada'}), 404
+
+            from utils.role_utils import sanitize_roles, normalize_role_name
+            roles_lookup = {r['nombre']: r for r in sanitize_roles(empresa.roles)}
+            rol_name = normalize_role_name(usuario.rol)
+            rol_info = roles_lookup.get(rol_name) if rol_name else None
+            if not rol_info or not rol_info.get('is_alert_manager'):
+                return jsonify({'success': False, 'error': 'Usuario no es alert manager'}), 403
+
+            alerts = self.service.alert_repo.get_latest_active_alert_per_sede(empresa.nombre)
+            serialized = []
+            for raw in alerts:
+                serialized.append({
+                    'alert_id': str(raw.get('_id')),
+                    'sede': raw.get('sede'),
+                    'tipo_alerta': raw.get('tipo_alerta'),
+                    'nombre_alerta': raw.get('nombre_alerta'),
+                    'descripcion': raw.get('descripcion'),
+                    'prioridad': raw.get('prioridad'),
+                    'fecha_creacion': raw.get('fecha_creacion').isoformat() if raw.get('fecha_creacion') else None
+                })
+
+            return jsonify({'success': True, 'empresa': empresa.nombre, 'alerts': serialized}), 200
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
+
+    def manager_switch_focus(self):
+        """Cambia el foco de alerta del manager actualizando su cache en WhatsApp.
+
+        Body JSON: { telefono: str, alert_id: str }
+        Valida que el manager pertenezca a la misma empresa que la alerta y aplica patch al cache.
+        """
+        try:
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Formato inválido', 'message': 'JSON requerido'}), 400
+            data = request.get_json() or {}
+            telefono = (data.get('telefono') or '').strip()
+            alert_id = (data.get('alert_id') or '').strip()
+            if not telefono or not alert_id:
+                return jsonify({'success': False, 'error': 'telefono y alert_id requeridos'}), 400
+
+            from repositories.usuario_repository import UsuarioRepository
+            from repositories.empresa_repository import EmpresaRepository
+            usuario_repo = UsuarioRepository()
+            empresa_repo = EmpresaRepository()
+
+            usuario = usuario_repo.find_by_telefono_global(telefono)
+            if not usuario:
+                return jsonify({'success': False, 'error': 'Usuario no encontrado'}), 404
+
+            empresa = empresa_repo.find_by_id(usuario.empresa_id)
+            if not empresa:
+                return jsonify({'success': False, 'error': 'Empresa no encontrada'}), 404
+
+            from utils.role_utils import sanitize_roles, normalize_role_name
+            roles_lookup = {r['nombre']: r for r in sanitize_roles(empresa.roles)}
+            rol_name = normalize_role_name(usuario.rol)
+            rol_info = roles_lookup.get(rol_name) if rol_name else None
+            if not rol_info or not rol_info.get('is_alert_manager'):
+                return jsonify({'success': False, 'error': 'Usuario no es alert manager'}), 403
+
+            alert = self.service.alert_repo.get_alert_by_id(alert_id)
+            if not alert:
+                return jsonify({'success': False, 'error': 'Alerta no encontrada'}), 404
+            if alert.empresa_nombre != empresa.nombre:
+                return jsonify({'success': False, 'error': 'Alerta no pertenece a la empresa del manager'}), 403
+            if not alert.activo:
+                return jsonify({'success': False, 'error': 'Alerta no está activa'}), 400
+
+            # Patch cache via WhatsApp HTTP API (PATCH /numbers/{phone})
+            import requests as _requests
+            from core.config import Config
+            phone_clean = telefono.lstrip('+')
+            patch_data = {
+                'alert_active': True,
+                'info_alert': {'alert_id': str(alert._id)}
+            }
+            try:
+                resp = _requests.patch(
+                    f"{Config.WHATSAPP_SERVICE_URL}/numbers/{phone_clean}",
+                    json=patch_data,
+                    timeout=Config.WHATSAPP_SERVICE_TIMEOUT
+                )
+                if resp.status_code != 200:
+                    return jsonify({'success': False, 'error': 'No se pudo actualizar cache', 'detail': resp.text}), 500
+            except Exception as exc:
+                return jsonify({'success': False, 'error': f'Error contactando WhatsApp: {exc}'}), 502
+
+            return jsonify({
+                'success': True,
+                'message': 'Foco actualizado',
+                'alert': {
+                    'alert_id': str(alert._id),
+                    'sede': alert.sede,
+                    'tipo_alerta': alert.tipo_alerta,
+                    'nombre_alerta': alert.nombre_alerta
+                }
+            }), 200
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500

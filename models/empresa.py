@@ -158,7 +158,7 @@ class Empresa:
             else:
                 for rol in self.roles:
                     if not isinstance(rol, dict):
-                        errors.append("Cada rol debe ser un objeto con nombre e is_creator")
+                        errors.append("Cada rol debe ser un objeto con nombre, is_creator e is_alert_manager")
                         break
                     nombre = rol.get('nombre')
                     if not nombre or not isinstance(nombre, str) or len(nombre.strip()) == 0:
@@ -166,6 +166,9 @@ class Empresa:
                         break
                     if not isinstance(rol.get('is_creator', False), bool):
                         errors.append("El campo is_creator de cada rol debe ser booleano")
+                        break
+                    if not isinstance(rol.get('is_alert_manager', False), bool):
+                        errors.append("El campo is_alert_manager de cada rol debe ser booleano")
                         break
 
         return errors

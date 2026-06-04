@@ -355,7 +355,8 @@ class MqttAlertRepository:
                 rol_info = roles_lookup.get(rol_name) if rol_name else None
                 usuario['rol_detalle'] = {
                     'nombre': rol_info['nombre'] if rol_info else rol_name,
-                    'is_creator': rol_info['is_creator'] if rol_info else False
+                    'is_creator': rol_info['is_creator'] if rol_info else False,
+                    'is_alert_manager': rol_info.get('is_alert_manager', False) if rol_info else False
                 }
                 usuarios.append(usuario)
 
@@ -363,7 +364,69 @@ class MqttAlertRepository:
         except Exception as e:
             # print(f"Error obteniendo usuarios por empresa y sede: {e}")
             return []
-    
+
+    def get_alert_managers_by_empresa(self, empresa_nombre):
+        """Obtiene todos los usuarios con rol is_alert_manager de una empresa (todas las sedes)"""
+        try:
+            empresa = self.db.empresas.find_one({'nombre': empresa_nombre})
+            if not empresa:
+                return []
+
+            catalogo_roles = sanitize_roles(empresa.get('roles'))
+            manager_role_names = {
+                entry['nombre'] for entry in catalogo_roles
+                if entry.get('is_alert_manager')
+            }
+
+            if not manager_role_names:
+                return []
+
+            roles_lookup = {entry['nombre']: entry for entry in catalogo_roles}
+
+            usuarios_cursor = self.db.usuarios.find({
+                'empresa_id': empresa['_id'],
+                'activo': True
+            }, {
+                'nombre': 1,
+                'telefono': 1,
+                'email': 1,
+                'rol': 1,
+                'sede': 1
+            })
+
+            managers = []
+            for usuario in usuarios_cursor:
+                rol_name = normalize_role_name(usuario.get('rol')) or None
+                if not rol_name or rol_name not in manager_role_names:
+                    continue
+                rol_info = roles_lookup.get(rol_name)
+                usuario['rol_detalle'] = {
+                    'nombre': rol_info['nombre'] if rol_info else rol_name,
+                    'is_creator': rol_info['is_creator'] if rol_info else False,
+                    'is_alert_manager': True
+                }
+                managers.append(usuario)
+
+            return managers
+        except Exception:
+            return []
+
+    def get_latest_active_alert_per_sede(self, empresa_nombre):
+        """Devuelve la última alerta activa de cada sede de la empresa"""
+        try:
+            pipeline = [
+                {'$match': {'empresa_nombre': empresa_nombre, 'activo': True}},
+                {'$sort': {'fecha_creacion': -1}},
+                {'$group': {
+                    '_id': '$sede',
+                    'alert': {'$first': '$$ROOT'}
+                }}
+            ]
+            results = list(self.collection.aggregate(pipeline))
+            return [r['alert'] for r in results]
+        except Exception:
+            return []
+
     def verify_hardware_exists(self, hardware_nombre):
         """Verifica si existe un hardware con el nombre especificado"""
         try:

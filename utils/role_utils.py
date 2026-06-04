@@ -4,8 +4,8 @@ from typing import Iterable, List, Optional
 
 # Roles predeterminados para nuevas empresas
 DEFAULT_EMPRESA_ROLES = [
-    {'nombre': 'operador', 'is_creator': False},
-    {'nombre': 'supervisor', 'is_creator': False},
+    {'nombre': 'operador', 'is_creator': False, 'is_alert_manager': False},
+    {'nombre': 'supervisor', 'is_creator': False, 'is_alert_manager': False},
 ]
 
 
@@ -22,6 +22,13 @@ def _extract_role_flag(role_entry) -> bool:
     """Obtiene el indicador is_creator de manera segura."""
     if isinstance(role_entry, dict):
         return bool(role_entry.get('is_creator', False))
+    return False
+
+
+def _extract_role_manager_flag(role_entry) -> bool:
+    """Obtiene el indicador is_alert_manager de manera segura."""
+    if isinstance(role_entry, dict):
+        return bool(role_entry.get('is_alert_manager', False))
     return False
 
 
@@ -59,9 +66,11 @@ def sanitize_roles(raw_roles: Optional[Iterable]) -> List[dict]:
         seen.add(normalized_name)
 
         is_creator_flag = _extract_role_flag(entry)
+        is_alert_manager_flag = _extract_role_manager_flag(entry)
         cleaned.append({
             'nombre': normalized_name,
-            'is_creator': bool(is_creator_flag)
+            'is_creator': bool(is_creator_flag),
+            'is_alert_manager': bool(is_alert_manager_flag)
         })
 
     if not cleaned:

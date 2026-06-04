@@ -2,10 +2,36 @@ from bson import ObjectId
 import bcrypt
 from models.empresa import Empresa
 from repositories.empresa_repository import EmpresaRepository
+from repositories.usuario_repository import UsuarioRepository
+from utils.whatsapp_service_client import whatsapp_client
+from utils.role_utils import sanitize_roles
 
 class EmpresaService:
     def __init__(self):
         self.empresa_repository = EmpresaRepository()
+        self.usuario_repository = UsuarioRepository()
+
+    def _roles_changed(self, prev_roles, new_roles) -> bool:
+        """Compara roles previos vs nuevos. Devuelve True si hay diferencia significativa."""
+        prev = {r['nombre']: (r.get('is_creator', False), r.get('is_alert_manager', False))
+                for r in sanitize_roles(prev_roles)}
+        curr = {r['nombre']: (r.get('is_creator', False), r.get('is_alert_manager', False))
+                for r in sanitize_roles(new_roles)}
+        return prev != curr
+
+    def _invalidate_whatsapp_cache_for_empresa(self, empresa_id) -> None:
+        """Borra del cache WhatsApp a todos los usuarios de la empresa (fire-and-forget)"""
+        try:
+            usuarios = self.usuario_repository.find_by_empresa(empresa_id) or []
+            for usr in usuarios:
+                telefono = getattr(usr, 'telefono', None)
+                if telefono:
+                    try:
+                        whatsapp_client.delete_number(telefono)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     
     def create_empresa(self, empresa_data, super_admin_id):
         """Crea una nueva empresa con validaciones"""
@@ -270,6 +296,9 @@ class EmpresaService:
             # Actualizar empresa
             result = self.empresa_repository.update(empresa_id, updated_empresa)
             if result:
+                # Si los roles cambiaron, invalidar cache WhatsApp de los usuarios de la empresa
+                if self._roles_changed(existing_empresa.roles, updated_empresa.roles):
+                    self._invalidate_whatsapp_cache_for_empresa(result._id)
                 return {
                     'success': True,
                     'data': result.to_json(),

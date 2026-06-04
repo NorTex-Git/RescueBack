@@ -1693,13 +1693,18 @@ class MqttAlertController:
                     'message': 'Alerta desactivada exitosamente',
                     'topics': topics,  # Topics de hardware de la empresa y sede
                     'numeros_telefonicos': numeros_telefonicos,
+                    'sede': alert.sede,
+                    'empresa_nombre': alert.empresa_nombre,
+                    'nombre_alerta': alert.nombre_alerta,
+                    'tipo_alerta': alert.tipo_alerta,
+                    'alert_id': str(alert._id),
                     'desactivado_por': {
                         'id': desactivado_por_id,
                         'tipo': desactivado_por_tipo,
                         'fecha_desactivacion': alert.fecha_desactivacion.isoformat()
                     },
-                    'prioridad': alert.prioridad,  # Incluir la prioridad de la alerta
-                    'mensaje_desactivacion': alert.mensaje_desactivacion  # Incluir el mensaje de desactivación
+                    'prioridad': alert.prioridad,
+                    'mensaje_desactivacion': alert.mensaje_desactivacion
                 }), 200
             else:
                 return jsonify({

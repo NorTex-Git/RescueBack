@@ -306,38 +306,56 @@ class MqttAlertService:
             }
     
     def get_alert_for_user(self, alert_id, user_id):
-        """Obtiene una alerta por ID si el usuario está en la lista de notificados."""
+        """Obtiene una alerta por ID si el usuario está en la lista de notificados
+        o si es alert_manager de la misma empresa."""
         try:
-            # print(f"🔍 Servicio: Buscando alerta {alert_id} para usuario {user_id}")
             alert = self.alert_repo.get_alert_by_id(alert_id)
-            
+
             if not alert:
                 return {
                     'success': False,
                     'error': 'Alert not found'
                 }
-            
+
             # Verificar si el usuario está en la lista de números telefónicos
             user_is_authorized = False
             for user_info in alert.numeros_telefonicos:
                 if user_info.get('usuario_id') == user_id:
                     user_is_authorized = True
                     break
-            
+
+            # Si no, verificar si es alert_manager de la misma empresa
+            if not user_is_authorized:
+                try:
+                    from repositories.usuario_repository import UsuarioRepository
+                    from repositories.empresa_repository import EmpresaRepository
+                    from utils.role_utils import sanitize_roles, normalize_role_name
+
+                    usuario = UsuarioRepository().find_by_id(user_id)
+                    if usuario and usuario.empresa_id:
+                        empresa = EmpresaRepository().find_by_id(usuario.empresa_id)
+                        if empresa and empresa.nombre == alert.empresa_nombre:
+                            roles_lookup = {r['nombre']: r for r in sanitize_roles(empresa.roles)}
+                            rol_name = normalize_role_name(usuario.rol)
+                            rol_info = roles_lookup.get(rol_name) if rol_name else None
+                            if rol_info and rol_info.get('is_alert_manager'):
+                                user_is_authorized = True
+                except Exception:
+                    pass
+
             if not user_is_authorized:
                 return {
                     'success': False,
                     'error': 'Access denied',
                     'message': 'El usuario no está autorizado para ver esta alerta'
                 }
-            
+
             return {
                 'success': True,
                 'alert': alert.to_json()
             }
-            
+
         except Exception as e:
-            # print(f"❌ Error obteniendo alerta para usuario: {e}")
             return {'success': False, 'error': str(e)}
     
     def get_alerts_by_empresa(self, empresa_nombre, page=1, limit=50):

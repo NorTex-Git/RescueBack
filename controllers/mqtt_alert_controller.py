@@ -1275,15 +1275,15 @@ class MqttAlertController:
                 empresa.nombre, sede
             )
             
-            # Extraer números telefónicos (excluir alert managers - ellos van en alert_managers aparte)
+            # Extraer números telefónicos (excluir alert managers - excepto si es el creador)
             numeros_telefonicos = []
             for usr in usuarios_relacionados:
                 if not usr.get('telefono'):
                     continue
                 rol_det = usr.get('rol_detalle') or {}
-                if isinstance(rol_det, dict) and rol_det.get('is_alert_manager'):
-                    continue
                 es_creador = str(usr.get('_id')) == usuario_id
+                if isinstance(rol_det, dict) and rol_det.get('is_alert_manager') and not es_creador:
+                    continue
                 numeros_telefonicos.append({
                     'numero': usr['telefono'],
                     'nombre': usr.get('nombre', ''),

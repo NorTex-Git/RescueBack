@@ -227,7 +227,12 @@ class MqttAlertController:
             if result.get('success') and result.get('alert_id'):
                 alert_obj = self.service.alert_repo.get_alert_by_id(result['alert_id'])
                 if alert_obj:
-                    return jsonify({'success': True, 'alert': alert_obj.to_json()}), 200
+                    managers_payload = self._build_alert_managers_payload(alert_obj.empresa_nombre)
+                    return jsonify({
+                        'success': True,
+                        'alert': alert_obj.to_json(),
+                        'alert_managers': managers_payload
+                    }), 200
 
             return jsonify(result), 200
             

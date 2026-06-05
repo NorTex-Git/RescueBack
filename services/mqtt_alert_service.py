@@ -162,18 +162,20 @@ class MqttAlertService:
                     'url_open_maps': hardware_data.get('direccion_open_maps') or ''
                 }
             
-            # Preparar números telefónicos desde usuarios_notificados
+            # Preparar números telefónicos (excluir alert managers)
             numeros_telefonicos = []
             for usuario in usuarios:
                 telefono = usuario.get('telefono')
                 if not telefono:
                     continue
-
+                rol_det = usuario.get('rol_detalle') or {}
+                if isinstance(rol_det, dict) and rol_det.get('is_alert_manager'):
+                    continue
                 numeros_telefonicos.append({
                     'numero': telefono,
                     'nombre': usuario.get('nombre', ''),
                     'usuario_id': str(usuario.get('_id')),
-                    'rol': usuario.get('rol_detalle'),
+                    'rol': rol_det,
                     'disponible': False,
                     'embarcado': False
                 })

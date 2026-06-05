@@ -504,18 +504,22 @@ class MqttAlertController:
                 empresa.nombre, hardware.sede
             )
             
-            # Extraer números telefónicos con nombres
+            # Extraer números telefónicos (excluir alert managers)
             numeros_telefonicos = []
             for usuario in usuarios_relacionados:
-                if usuario.get('telefono'):
-                    numeros_telefonicos.append({
-                        'numero': usuario['telefono'],
-                        'nombre': usuario.get('nombre', ''),
-                        'usuario_id': str(usuario.get('_id')),
-                        'rol': usuario.get('rol_detalle'),
-                        'disponible': False,  # Por defecto False para alertas de hardware
-                        'embarcado': False    # Por defecto False
-                    })
+                if not usuario.get('telefono'):
+                    continue
+                rol_det = usuario.get('rol_detalle') or {}
+                if isinstance(rol_det, dict) and rol_det.get('is_alert_manager'):
+                    continue
+                numeros_telefonicos.append({
+                    'numero': usuario['telefono'],
+                    'nombre': usuario.get('nombre', ''),
+                    'usuario_id': str(usuario.get('_id')),
+                    'rol': rol_det,
+                    'disponible': False,
+                    'embarcado': False
+                })
             
             # Buscar otros hardware de la misma empresa y sede que NO sean botoneras
             otros_hardware = hardware_repo.find_with_filters({
@@ -1271,21 +1275,23 @@ class MqttAlertController:
                 empresa.nombre, sede
             )
             
-            # Extraer números telefónicos
+            # Extraer números telefónicos (excluir alert managers - ellos van en alert_managers aparte)
             numeros_telefonicos = []
             for usr in usuarios_relacionados:
-                if usr.get('telefono'):
-                    # Determinar si este usuario es el creador de la alerta
-                    es_creador = str(usr.get('_id')) == usuario_id
-                    
-                    numeros_telefonicos.append({
-                        'numero': usr['telefono'],
-                        'nombre': usr.get('nombre', ''),
-                        'usuario_id': str(usr.get('_id')),
-                        'rol': usr.get('rol_detalle'),
-                        'disponible': es_creador,  # True si es el creador, False para otros
-                        'embarcado': False  # Por defecto False para todos
-                    })
+                if not usr.get('telefono'):
+                    continue
+                rol_det = usr.get('rol_detalle') or {}
+                if isinstance(rol_det, dict) and rol_det.get('is_alert_manager'):
+                    continue
+                es_creador = str(usr.get('_id')) == usuario_id
+                numeros_telefonicos.append({
+                    'numero': usr['telefono'],
+                    'nombre': usr.get('nombre', ''),
+                    'usuario_id': str(usr.get('_id')),
+                    'rol': rol_det,
+                    'disponible': es_creador,
+                    'embarcado': False
+                })
             
             # Preparar datos adicionales simplificados sin redundancias
             data_adicional = {
@@ -1620,16 +1626,20 @@ class MqttAlertController:
                     )
                     
                     for usr in usuarios_relacionados:
-                        if usr.get('telefono'):
-                            numeros_telefonicos.append({
-                                'numero': usr['telefono'],
-                                'nombre': usr.get('nombre', ''),
-                                'usuario_id': str(usr.get('_id')),
-                                'rol': usr.get('rol_detalle'),
-                                'disponible': False,  # Fallback por defecto
-                                'embarcado': False    # Fallback por defecto
-                            })
-                
+                        if not usr.get('telefono'):
+                            continue
+                        rol_det = usr.get('rol_detalle') or {}
+                        if isinstance(rol_det, dict) and rol_det.get('is_alert_manager'):
+                            continue
+                        numeros_telefonicos.append({
+                            'numero': usr['telefono'],
+                            'nombre': usr.get('nombre', ''),
+                            'usuario_id': str(usr.get('_id')),
+                            'rol': rol_det,
+                            'disponible': False,
+                            'embarcado': False
+                        })
+
                 return jsonify({
                     'success': True,
                     'message': 'Alerta ya fue desactivada previamente',
@@ -1651,15 +1661,19 @@ class MqttAlertController:
                 )
                 
                 for usr in usuarios_relacionados:
-                    if usr.get('telefono'):
-                        numeros_telefonicos.append({
-                            'numero': usr['telefono'],
-                            'nombre': usr.get('nombre', ''),
-                            'usuario_id': str(usr.get('_id')),
-                            'rol': usr.get('rol_detalle'),
-                            'disponible': False,  # Fallback por defecto
-                            'embarcado': False    # Fallback por defecto
-                        })
+                    if not usr.get('telefono'):
+                        continue
+                    rol_det = usr.get('rol_detalle') or {}
+                    if isinstance(rol_det, dict) and rol_det.get('is_alert_manager'):
+                        continue
+                    numeros_telefonicos.append({
+                        'numero': usr['telefono'],
+                        'nombre': usr.get('nombre', ''),
+                        'usuario_id': str(usr.get('_id')),
+                        'rol': rol_det,
+                        'disponible': False,
+                        'embarcado': False
+                    })
 
             # Obtener topics de hardware de la empresa y sede (excluyendo botoneras)
             from repositories.hardware_repository import HardwareRepository

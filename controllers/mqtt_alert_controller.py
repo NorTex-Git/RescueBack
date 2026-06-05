@@ -1714,16 +1714,22 @@ class MqttAlertController:
             success = self.service.alert_repo.update_alert(alert_id, alert)
             
             if success:
+                # Excluir al que desactiva del payload de managers (si es manager, ya recibió aviso)
+                alert_managers_payload = self._build_alert_managers_payload(
+                    alert.empresa_nombre,
+                    exclude_user_id=desactivado_por_id
+                )
                 return jsonify({
                     'success': True,
                     'message': 'Alerta desactivada exitosamente',
-                    'topics': topics,  # Topics de hardware de la empresa y sede
+                    'topics': topics,
                     'numeros_telefonicos': numeros_telefonicos,
                     'sede': alert.sede,
                     'empresa_nombre': alert.empresa_nombre,
                     'nombre_alerta': alert.nombre_alerta,
                     'tipo_alerta': alert.tipo_alerta,
                     'alert_id': str(alert._id),
+                    'alert_managers': alert_managers_payload,
                     'desactivado_por': {
                         'id': desactivado_por_id,
                         'tipo': desactivado_por_tipo,

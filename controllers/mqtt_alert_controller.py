@@ -35,13 +35,19 @@ class MqttAlertController:
 
         threading.Thread(target=_fire, daemon=True).start()
 
-    def _build_alert_managers_payload(self, empresa_nombre: str) -> list:
-        """Construye payload de managers para fanout (telefonos de usuarios is_alert_manager de toda la empresa)"""
+    def _build_alert_managers_payload(self, empresa_nombre: str, exclude_user_id: str = None) -> list:
+        """Construye payload de managers para fanout (telefonos de usuarios is_alert_manager de toda la empresa).
+
+        Si exclude_user_id se proporciona, ese usuario NO aparece en la lista de managers
+        (típicamente el creador del alerta, que ya está en numeros_telefonicos).
+        """
         try:
             managers = self.service.alert_repo.get_alert_managers_by_empresa(empresa_nombre)
             payload = []
             for usr in managers:
                 if not usr.get('telefono'):
+                    continue
+                if exclude_user_id and str(usr.get('_id')) == str(exclude_user_id):
                     continue
                 payload.append({
                     'numero': usr.get('telefono'),
@@ -1404,7 +1410,8 @@ class MqttAlertController:
             created_alert = self.service.alert_repo.create_alert(alert)
 
             # Fanout MQTT: notificar a MqttConnection via HTTP interno (fire-and-forget)
-            alert_managers_payload = self._build_alert_managers_payload(empresa.nombre)
+            # Excluir al creador del payload de managers (ya está en numeros_telefonicos como participante)
+            alert_managers_payload = self._build_alert_managers_payload(empresa.nombre, exclude_user_id=creador_id_final)
             self._notify_mqtt_fanout(created_alert.to_json(), alert_managers_payload)
 
             # Respuesta exitosa unificada

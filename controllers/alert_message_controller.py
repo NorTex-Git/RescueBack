@@ -30,6 +30,10 @@ class AlertMessageController:
             alert = self.alert_repo.get_alert_by_id(alert_id)
             if not alert:
                 return jsonify({'success': False, 'error': 'Alerta no encontrada'}), 404
+            # Rechazar logs sobre alertas ya desactivadas: previene mensajes huérfanos
+            # cuando manager sigue escribiendo después del cierre.
+            if hasattr(alert, 'activo') and not alert.activo:
+                return jsonify({'success': False, 'error': 'Alerta inactiva', 'message': 'No se pueden registrar mensajes en una alerta desactivada'}), 409
 
             message = AlertMessage(
                 alert_id=alert._id,

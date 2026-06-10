@@ -10,7 +10,8 @@ class AlertMessage:
 
     def __init__(self, alert_id=None, phone=None, direction=None, type=None,
                  body=None, payload=None, user_id=None, user_name=None,
-                 is_template=False, is_navigation=False, fecha=None, _id=None):
+                 user_role=None, is_template=False, is_navigation=False,
+                 fecha=None, _id=None):
         self._id = _id or ObjectId()
         self.alert_id = alert_id
         self.phone = phone
@@ -20,6 +21,7 @@ class AlertMessage:
         self.payload = payload or {}
         self.user_id = user_id
         self.user_name = user_name
+        self.user_role = user_role or ""
         self.is_template = bool(is_template)
         self.is_navigation = bool(is_navigation)
         self.fecha = fecha or datetime.utcnow()
@@ -35,6 +37,7 @@ class AlertMessage:
             'payload': self.payload,
             'user_id': self.user_id,
             'user_name': self.user_name,
+            'user_role': self.user_role,
             'is_template': self.is_template,
             'is_navigation': self.is_navigation,
             'fecha': self.fecha
@@ -51,6 +54,7 @@ class AlertMessage:
             'payload': self.payload,
             'user_id': self.user_id,
             'user_name': self.user_name,
+            'user_role': self.user_role,
             'is_template': self.is_template,
             'is_navigation': self.is_navigation,
             'fecha': self.fecha.isoformat() if isinstance(self.fecha, datetime) else self.fecha
@@ -70,6 +74,7 @@ class AlertMessage:
             payload=data.get('payload', {}),
             user_id=data.get('user_id'),
             user_name=data.get('user_name'),
+            user_role=data.get('user_role', ''),
             is_template=bool(data.get('is_template', False)),
             is_navigation=bool(data.get('is_navigation', False)),
             fecha=data.get('fecha')

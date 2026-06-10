@@ -40,6 +40,7 @@ class AlertMessageController:
                 payload=data.get('payload', {}),
                 user_id=data.get('user_id'),
                 user_name=data.get('user_name'),
+                user_role=data.get('user_role', ''),
                 is_template=bool(data.get('is_template', False)),
                 is_navigation=bool(data.get('is_navigation', False))
             )

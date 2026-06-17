@@ -1281,15 +1281,15 @@ class MqttAlertController:
                 empresa.nombre, sede
             )
             
-            # Extraer números telefónicos (excluir alert managers - excepto si es el creador)
+            # Incluir managers que SON miembros de esta sede (la query ya filtra por empresa+sede).
+            # Excluirlos vaciaba "Contactos Notificados" en alertas de empresa, donde ningún
+            # usuario es es_creador. Managers cross-sede se notifican aparte vía alert_managers.
             numeros_telefonicos = []
             for usr in usuarios_relacionados:
                 if not usr.get('telefono'):
                     continue
                 rol_det = usr.get('rol_detalle') or {}
                 es_creador = str(usr.get('_id')) == usuario_id
-                if isinstance(rol_det, dict) and rol_det.get('is_alert_manager') and not es_creador:
-                    continue
                 numeros_telefonicos.append({
                     'numero': usr['telefono'],
                     'nombre': usr.get('nombre', ''),

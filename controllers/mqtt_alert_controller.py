@@ -611,7 +611,12 @@ class MqttAlertController:
             
             # Crear en base de datos
             created_alert = self.service.alert_repo.create_alert(alert)
-            
+
+            # Fanout MQTT: notificar a MqttConnection via HTTP interno (fire-and-forget).
+            # Hardware no tiene usuario-creador, por eso no se excluye a nadie de managers.
+            alert_managers_payload = self._build_alert_managers_payload(empresa.nombre)
+            self._notify_mqtt_fanout(created_alert.to_json(), alert_managers_payload)
+
             # INVALIDAR TOKEN DESPUÉS DE USO EXITOSO
             self.hardware_auth_service.invalidate_token_after_use(token)
             

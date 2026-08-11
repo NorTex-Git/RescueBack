@@ -48,3 +48,4 @@ class Config:
 
     # URL interna del servicio MQTT/WebSocket para fanout
     MQTT_SERVICE_URL = os.getenv('MQTT_SERVICE_URL', 'http://rescue-websocket:8081')
+    MQTT_SERVICE_TIMEOUT = int(os.getenv('MQTT_SERVICE_TIMEOUT', 10))

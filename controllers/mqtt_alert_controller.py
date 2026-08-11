@@ -14,26 +14,105 @@ class MqttAlertController:
         self.service = MqttAlertService()
         self.hardware_auth_service = HardwareAuthService()
 
-    def _notify_mqtt_fanout(self, alert_data: dict, alert_managers: list = None) -> None:
-        """Notificar a MqttConnection para fanout MQTT - fire and forget en hilo separado"""
+    def _post_internal_fanout(self, payload: dict, alert_id: str, evento: str) -> None:
+        """POST fire-and-forget a MqttConnection. Un fallo aquí significa que el
+        hardware NO se entera del evento, así que se registra como ERROR."""
         import threading
         import requests as _requests
         import logging as _logging
         from core.config import Config
 
+        logger = _logging.getLogger(__name__)
+
+        def _fire():
+            url = f"{Config.MQTT_SERVICE_URL}/internal/fanout-alert"
+            try:
+                response = _requests.post(url, json=payload, timeout=Config.MQTT_SERVICE_TIMEOUT)
+                if response.status_code != 200:
+                    logger.error(
+                        "Fanout MQTT (%s) rechazado para alerta %s: HTTP %s %s",
+                        evento, alert_id, response.status_code, response.text[:300]
+                    )
+                else:
+                    logger.info("Fanout MQTT (%s) enviado para alerta %s", evento, alert_id)
+            except Exception as e:
+                logger.error(
+                    "Fanout MQTT (%s) FALLÓ para alerta %s en %s: %s — el hardware no fue notificado",
+                    evento, alert_id, url, e
+                )
+
+        threading.Thread(target=_fire, daemon=True).start()
+
+    def _notify_mqtt_fanout(self, alert_data: dict, alert_managers: list = None) -> None:
+        """Notificar a MqttConnection la ACTIVACIÓN de una alerta (fire and forget)"""
         payload = {
             'alert': alert_data,
             'alert_managers': alert_managers or []
         }
+        self._post_internal_fanout(
+            payload=payload,
+            alert_id=str(alert_data.get('_id', 'N/A')),
+            evento='activacion'
+        )
 
-        def _fire():
-            try:
-                url = f"{Config.MQTT_SERVICE_URL}/internal/fanout-alert"
-                _requests.post(url, json=payload, timeout=5)
-            except Exception as e:
-                _logging.getLogger(__name__).warning("Fanout MQTT no disponible: %s", e)
+    def _notify_mqtt_deactivation(self, alert, topics: list, numeros_telefonicos: list,
+                                  desactivado_por: dict, alert_managers: list = None) -> None:
+        """Notificar a MqttConnection la DESACTIVACIÓN de una alerta.
 
-        threading.Thread(target=_fire, daemon=True).start()
+        Antes esto lo mandaba el navegador por WebSocket: si el usuario cerraba la
+        pestaña o el WS estaba caído, el hardware se quedaba en alarma. Ahora el
+        backend es la fuente única del evento.
+
+        La estructura debe cumplir EmpresaAlertHandler._validate_empresa_message:
+        alert.{id, usuarios, hardware_vinculado} son obligatorios.
+        """
+        usuarios_payload = []
+        for usuario in numeros_telefonicos or []:
+            if not isinstance(usuario, dict):
+                continue
+            numero = usuario.get('numero') or usuario.get('telefono')
+            if not numero:
+                continue
+            # Se emiten ambas claves: el envío de WhatsApp lee 'telefono' y la
+            # limpieza de cache acepta 'numero'/'telefono'/'phone'.
+            usuarios_payload.append({
+                'nombre': usuario.get('nombre', ''),
+                'telefono': numero,
+                'numero': numero,
+                'usuario_id': usuario.get('usuario_id', ''),
+                'tipo': 'contacto_telefono'
+            })
+
+        hardware_vinculado = [
+            {'topic': topic, 'nombre': topic.split('/')[-1], 'id_origen': None}
+            for topic in (topics or []) if topic
+        ]
+
+        payload = {
+            'type': 'alert_deactivated_by_empresa',
+            'timestamp': datetime.utcnow().isoformat(),
+            'alert': {
+                'id': str(alert._id),
+                'nombre': alert.nombre_alerta or alert.tipo_alerta or 'Alerta',
+                'empresa': alert.empresa_nombre,
+                'sede': alert.sede,
+                'prioridad': alert.prioridad or 'media',
+                'topic': alert.topic,
+                'usuarios': usuarios_payload,
+                'hardware_vinculado': hardware_vinculado,
+                'fecha_creacion': alert.fecha_creacion.isoformat() if alert.fecha_creacion else None,
+                'fecha_desactivacion': alert.fecha_desactivacion.isoformat() if alert.fecha_desactivacion else None,
+                'desactivado_por': desactivado_por or {},
+                'mensaje_desactivacion': alert.mensaje_desactivacion
+            },
+            'alert_managers': alert_managers or []
+        }
+
+        self._post_internal_fanout(
+            payload=payload,
+            alert_id=str(alert._id),
+            evento='desactivacion'
+        )
 
     def _build_alert_managers_payload(self, empresa_nombre: str, exclude_user_id: str = None) -> list:
         """Construye payload de managers para fanout (telefonos de usuarios is_alert_manager de toda la empresa).
@@ -1687,30 +1766,26 @@ class MqttAlertController:
                         'embarcado': False
                     })
 
-            # Obtener topics de hardware de la empresa y sede (excluyendo botoneras)
+            # Obtener topics del hardware de la empresa y sede de la alerta.
+            # A diferencia de la activación, aquí SÍ se incluyen las botoneras:
+            # al apagar, todos los dispositivos deben volver a NORMAL.
+            # Se filtra en la consulta (antes se recorría todo el hardware del
+            # sistema y se resolvía la empresa de cada uno, uno por uno).
             from repositories.hardware_repository import HardwareRepository
+            from repositories.empresa_repository import EmpresaRepository
             hardware_repo = HardwareRepository()
-            todos_hardware = hardware_repo.find_with_filters({
-                'activa': True  # Solo hardware activo
-            })
-            
+            empresa_repo = EmpresaRepository()
+
             topics = []
-            for hw in todos_hardware:
-                # Filtrar por empresa y sede, y excluir botoneras
-                if (hw.topic and 
-                    hw.tipo.upper() != 'BOTONERA' and
-                    hasattr(hw, 'empresa_id')):
-                    
-                    # Obtener información de la empresa del hardware
-                    from repositories.empresa_repository import EmpresaRepository
-                    empresa_repo = EmpresaRepository()
-                    hw_empresa = empresa_repo.find_by_id(hw.empresa_id)
-                    
-                    # Solo incluir si coincide con empresa y sede de la alerta
-                    if (hw_empresa and 
-                        hw_empresa.nombre == alert.empresa_nombre and 
-                        hw.sede == alert.sede):
-                        topics.append(hw.topic)
+            empresa_alerta = empresa_repo.find_by_nombre(alert.empresa_nombre)
+            if empresa_alerta:
+                hardware_sede = hardware_repo.find_with_filters({
+                    'empresa_id': empresa_alerta._id,
+                    'sede': alert.sede
+                })
+                topics = [hw.topic for hw in hardware_sede if hw.topic]
+            else:
+                print(f"⚠️ Empresa '{alert.empresa_nombre}' no encontrada: sin topics para desactivar")
 
             # Desactivar con información de quien desactiva
             alert.deactivate(desactivado_por_id=desactivado_por_id, desactivado_por_tipo=desactivado_por_tipo, mensaje_desactivacion=mensaje_desactivacion)
@@ -1724,6 +1799,24 @@ class MqttAlertController:
                     alert.empresa_nombre,
                     exclude_user_id=desactivado_por_id
                 )
+
+                desactivado_por_payload = {
+                    'id': desactivado_por_id,
+                    'tipo': desactivado_por_tipo,
+                    'nombre': alert.empresa_nombre if desactivado_por_tipo == 'empresa' else '',
+                    'fecha_desactivacion': alert.fecha_desactivacion.isoformat()
+                }
+
+                # Apagar el hardware desde el backend. Antes esto dependía de que
+                # el navegador mandara el evento por WebSocket.
+                self._notify_mqtt_deactivation(
+                    alert=alert,
+                    topics=topics,
+                    numeros_telefonicos=numeros_telefonicos,
+                    desactivado_por=desactivado_por_payload,
+                    alert_managers=alert_managers_payload
+                )
+
                 return jsonify({
                     'success': True,
                     'message': 'Alerta desactivada exitosamente',

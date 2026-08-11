@@ -606,8 +606,9 @@ class MqttAlertController:
                     'embarcado': False
                 })
             
-            # Buscar otros hardware de la misma empresa y sede que NO sean botoneras
-            otros_hardware = hardware_repo.find_with_filters({
+            # Buscar otros hardware de la misma empresa y sede que NO sean botoneras.
+            # Se incluye el hardware inactivo a propósito: igual se le manda el topic.
+            otros_hardware = hardware_repo.find_with_filters_including_inactive({
                 'empresa_id': hardware.empresa_id,
                 'sede': hardware.sede
             })
@@ -1349,10 +1350,10 @@ class MqttAlertController:
             # Obtener topics de otros hardware (excluir botoneras) para notificaciones
             from repositories.hardware_repository import HardwareRepository
             hardware_repo = HardwareRepository()
-            todos_hardware = hardware_repo.find_with_filters({
+            # Incluye hardware inactivo a propósito: igual se le manda el topic.
+            todos_hardware = hardware_repo.find_with_filters_including_inactive({
                 'empresa_id': empresa._id,
-                'sede': sede,
-                'activa': True  # Solo hardware activo
+                'sede': sede
             })
             
             topics = []
@@ -1779,7 +1780,7 @@ class MqttAlertController:
             topics = []
             empresa_alerta = empresa_repo.find_by_nombre(alert.empresa_nombre)
             if empresa_alerta:
-                hardware_sede = hardware_repo.find_with_filters({
+                hardware_sede = hardware_repo.find_with_filters_including_inactive({
                     'empresa_id': empresa_alerta._id,
                     'sede': alert.sede
                 })

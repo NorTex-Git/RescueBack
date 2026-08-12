@@ -12,6 +12,7 @@ from utils.permissions import (
     require_empresa_token,
     require_super_admin_token,
 )
+from decorators.internal_token_decorator import require_internal_token
 
 # ========== BLUEPRINT DE AUTENTICACIÓN ==========
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
@@ -31,6 +32,17 @@ def logout():
 def refresh():
     """POST /auth/refresh - Renovar access token"""
     return auth_controller.refresh()
+
+@auth_bp.route('/realtime-ticket', methods=['GET'])
+def realtime_ticket():
+    """GET /auth/realtime-ticket - Ticket efimero para WebSocket."""
+    return auth_controller.realtime_ticket()
+
+@auth_bp.route('/realtime-ticket/validate', methods=['POST'])
+@require_internal_token
+def validate_realtime_ticket():
+    """POST interno para que el gateway valide el ticket sin compartir secretos."""
+    return auth_controller.validate_realtime_ticket()
 
 @auth_bp.route('/sessions', methods=['GET'])
 def get_my_sessions():
@@ -135,6 +147,7 @@ def get_hardware_list():
     return hardware_controller.get_hardware_list()
 
 @hardware_bp.route('/empresa/<empresa_id>', methods=['GET'])
+@require_empresa_or_admin_token
 def get_hardware_by_empresa(empresa_id):
     return hardware_controller.get_hardware_by_empresa(empresa_id)
 
@@ -177,6 +190,7 @@ def get_all_hardware_including_inactive():
     return hardware_controller.get_all_hardware_including_inactive()
 
 @hardware_bp.route('/empresa/<empresa_id>/including-inactive', methods=['GET'])
+@require_empresa_or_admin_token
 def get_hardware_by_empresa_including_inactive(empresa_id):
     """GET /api/hardware/empresa/<empresa_id>/including-inactive - Obtener hardware de empresa incluyendo inactivos"""
     return hardware_controller.get_hardware_by_empresa_including_inactive(empresa_id)
@@ -305,6 +319,32 @@ def get_usuarios_by_empresa_including_inactive(empresa_id):
 # ========== BLUEPRINT DE ALERTAS MQTT - COMENTADO PARA REHACER ==========
 mqtt_alert_bp = Blueprint('mqtt_alerts', __name__, url_prefix='/api/mqtt-alerts')
 mqtt_alert_controller = MqttAlertController()
+
+# Carga inicial y reconciliacion del panel. Los cambios posteriores llegan por
+# realtime, por lo que este endpoint no debe consultarse mediante polling corto.
+notifications_bp = Blueprint('notifications', __name__, url_prefix='/api/notifications')
+
+@notifications_bp.route('/active', methods=['GET'])
+@require_empresa_or_admin_token
+def get_active_notifications():
+    from flask import g, jsonify, request
+
+    page = max(int(request.args.get('page', 1)), 1)
+    limit = min(max(int(request.args.get('limit', 10)), 1), 50)
+    if g.role == 'empresa':
+        result = mqtt_alert_controller.service.get_alerts_active_by_empresa_sede(
+            g.empresa_id, page, limit
+        )
+    else:
+        result = mqtt_alert_controller.service.get_active_alerts(page, limit)
+
+    alerts = result.get('alerts') or result.get('data') or []
+    pagination = result.get('pagination') or {}
+    return jsonify({
+        'success': bool(result.get('success', True)),
+        'notifications': alerts,
+        'total': result.get('total', pagination.get('total_items', len(alerts))),
+    }), 200
 
 # ========== BLUEPRINT DE AUTENTICACIÓN DE HARDWARE ==========
 from controllers.hardware_auth_controller import HardwareAuthController
@@ -521,6 +561,7 @@ def register_routes(app):
     app.register_blueprint(hardware_type_bp)
     app.register_blueprint(multitenant_bp)
     app.register_blueprint(mqtt_alert_bp)  # Rehabilitado para manejar alertas MQTT
+    app.register_blueprint(notifications_bp)
     app.register_blueprint(hardware_auth_bp)
     app.register_blueprint(phone_lookup_bp)  # Búsqueda por teléfono
     app.register_blueprint(contact_bp)  # Formulario de contacto

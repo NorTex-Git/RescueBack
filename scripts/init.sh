@@ -1,81 +1,64 @@
 #!/bin/sh
-# Script de inicialización: espera la base y crea el admin antes de iniciar la app
-# Usa /bin/sh para mayor compatibilidad en contenedores Alpine/slim
+set -eu
 
-echo "🔧 Inicializando aplicación Rescue Backend..."
-echo "========================================"
-echo "📍 MONGO_URI: ${MONGO_URI}"
-echo "📍 DATABASE_NAME: ${DATABASE_NAME}"
-echo "========================================"
+echo "Inicializando Rescue Backend..."
+echo "Base de datos: ${DATABASE_NAME:-rescue}"
 
-# Función para esperar a que MongoDB esté disponible
 wait_for_mongo() {
-    echo "⏳ Esperando a que MongoDB esté disponible..."
-    max_attempts=60  # Aumentamos a 60 intentos (2 minutos)
-    attempt=0
-    
-    while [ $attempt -lt $max_attempts ]; do
-        # Intentar conectar usando pymongo directamente
-        if python -c "
+    max_attempts="${MONGO_CONNECT_ATTEMPTS:-60}"
+    attempt=1
+
+    echo "Esperando a MongoDB..."
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if python -c '
+import os
 import sys
 from pymongo import MongoClient
-import os
 
 try:
-    uri = os.environ.get('MONGO_URI', 'mongodb://localhost:27017')
+    uri = os.environ.get("MONGO_URI", "mongodb://mongodb:27017/rescue_db")
     client = MongoClient(uri, serverSelectionTimeoutMS=2000)
-    client.admin.command('ping')
-    print('✅ MongoDB conectado exitosamente')
-    sys.exit(0)
-except Exception as e:
-    print(f'⏳ Esperando MongoDB... Error: {e}')
+    client.admin.command("ping")
+    client.close()
+except Exception:
     sys.exit(1)
-" 2>&1; then
-            echo "✅ MongoDB está disponible y respondiendo"
+'; then
+            echo "MongoDB disponible."
             return 0
         fi
-        echo "   MongoDB no está listo, intento $((attempt + 1))/$max_attempts..."
-        sleep 2
+
+        echo "MongoDB no disponible (intento ${attempt}/${max_attempts})."
         attempt=$((attempt + 1))
+        sleep 2
     done
-    
-    echo "❌ MongoDB no pudo conectarse después de $max_attempts intentos"
-    echo "   Verifica que el servicio mongodb esté corriendo"
-    exit 1
+
+    echo "MongoDB no respondio despues de ${max_attempts} intentos." >&2
+    return 1
 }
 
-# Esperar a MongoDB
 wait_for_mongo
 
-# Ejecutar script de administrador
-echo "👤 Verificando administrador por defecto..."
-cd /app && python -c "
-import sys
-sys.path.append('/app')
+echo "Verificando administrador inicial..."
+if ! python -c '
 from scripts.init_admin import init_admin
-try:
-    init_admin()
-    print('✅ Administrador inicializado correctamente')
-except Exception as e:
-    print(f'⚠️ Error inicializando administrador: {e}')
-"
-if [ $? -eq 0 ]; then
-    echo "✅ Administrador listo"
-else
-    echo "⚠️  Error al preparar el administrador, continuando..."
+init_admin()
+'; then
+    echo "No se pudo inicializar el administrador; el backend continuara." >&2
 fi
 
-echo "🚀 Iniciando aplicación con Gunicorn..."
-echo "========================================"
+workers="${GUNICORN_WORKERS:-3}"
+timeout="${GUNICORN_TIMEOUT:-60}"
 
-# Iniciar la aplicación con Gunicorn (configuración de producción)
+echo "Iniciando Gunicorn en 0.0.0.0:5002 con ${workers} workers."
 exec gunicorn \
     --bind 0.0.0.0:5002 \
-    --workers 3 \
+    --workers "$workers" \
     --worker-class sync \
-    --timeout 60 \
+    --timeout "$timeout" \
     --keep-alive 2 \
+    --max-requests 1000 \
+    --max-requests-jitter 50 \
     --access-logfile - \
     --error-logfile - \
-    --log-level info \
+    --log-level "${GUNICORN_LOG_LEVEL:-info}" \
     "app:create_app()"

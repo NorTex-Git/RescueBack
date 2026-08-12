@@ -340,3 +340,4 @@ sessions/
 # Archivos de cache personalizados
 .app_cache/
 .custom_cache/
+.codebase-memory/

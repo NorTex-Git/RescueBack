@@ -8,6 +8,40 @@ class AuthController:
         self.auth_service = AuthService()
         self.security_middleware = SecurityMiddleware()
 
+    def realtime_ticket(self):
+        """Emitir un ticket temporal para el canal realtime autenticado."""
+        try:
+            from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity, get_jwt
+            from utils.realtime_token import create_realtime_ticket
+
+            verify_jwt_in_request()
+            user_id = get_jwt_identity()
+            role = get_jwt().get('role')
+            if role not in ('empresa', 'super_admin'):
+                return jsonify({'success': False, 'error': 'Rol no autorizado'}), 403
+
+            ticket, expires_at = create_realtime_ticket(user_id, role)
+            return jsonify({
+                'success': True,
+                'ticket': ticket,
+                'expires_at': expires_at,
+            }), 200
+        except Exception:
+            return jsonify({
+                'success': False,
+                'error': 'No se pudo crear el ticket realtime',
+            }), 401
+
+    def validate_realtime_ticket(self):
+        """Validacion interna usada una vez al abrir una conexion WebSocket."""
+        from utils.realtime_token import verify_realtime_ticket
+
+        data = request.get_json(silent=True) or {}
+        principal = verify_realtime_ticket(data.get('ticket'))
+        if not principal:
+            return jsonify({'success': False}), 401
+        return jsonify({'success': True, 'principal': principal}), 200
+
     def login(self):
         """Endpoint POST /auth/login"""
         try:

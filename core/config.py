@@ -49,3 +49,6 @@ class Config:
     # URL interna del servicio MQTT/WebSocket para fanout
     MQTT_SERVICE_URL = os.getenv('MQTT_SERVICE_URL', 'http://rescue-websocket:8081')
     MQTT_SERVICE_TIMEOUT = int(os.getenv('MQTT_SERVICE_TIMEOUT', 10))
+    # Secreto compartido para tickets efimeros del canal realtime.
+    REALTIME_SECRET = os.getenv('REALTIME_SECRET') or JWT_SECRET_KEY
+    REALTIME_TICKET_TTL_SECONDS = int(os.getenv('REALTIME_TICKET_TTL_SECONDS', 60))

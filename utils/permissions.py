@@ -11,6 +11,20 @@ import jwt
 from core.config import Config
 
 
+def _deny_cross_tenant_access(kwargs):
+    """Impide que un token empresa opere sobre el id de otra empresa."""
+    if getattr(g, 'role', None) != 'empresa':
+        return None
+
+    target_empresa_id = kwargs.get('empresa_id')
+    if target_empresa_id is not None and str(target_empresa_id) != str(g.empresa_id):
+        return jsonify({
+            "success": False,
+            "errors": ["No tienes permisos para acceder a otra empresa"],
+        }), 403
+    return None
+
+
 def require_super_admin_token(f):
     """Solo permite acceso a super_admin"""
     @wraps(f)
@@ -131,6 +145,9 @@ def require_empresa_token(f):
             g.user_id = claims.get('sub')
             g.role = "empresa"
             g.empresa_id = g.user_id
+            scope_error = _deny_cross_tenant_access(kwargs)
+            if scope_error:
+                return scope_error
             return f(*args, **kwargs)
             
         except Exception as e:
@@ -194,6 +211,9 @@ def require_empresa_or_admin_token(f):
                     jsonify({"success": False, "errors": ["Permisos insuficientes"]}),
                     401,
                 )
+            scope_error = _deny_cross_tenant_access(kwargs)
+            if scope_error:
+                return scope_error
             return f(*args, **kwargs)
             
         except Exception as e:

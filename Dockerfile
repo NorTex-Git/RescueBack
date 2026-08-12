@@ -1,73 +1,50 @@
-# ==========================================
-# Dockerfile para RESCUE Backend
-# Flask + MongoDB
-# ==========================================
+# syntax=docker/dockerfile:1.7
 
-FROM python:3.11-slim
+# Dependencias aisladas: pip corre como usuario sin privilegios dentro de un venv.
+FROM python:3.11-slim AS builder
 
-# Información del mantenedor
-LABEL maintainer="RESCUE Team"
-LABEL description="Backend Flask para sistema RESCUE con MongoDB"
-LABEL version="1.0"
-
-# Variables de entorno optimizadas
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-# Crear usuario no-root para seguridad
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+RUN groupadd --system appgroup \
+    && useradd --system --gid appgroup --create-home appuser \
+    && python -m venv "$VIRTUAL_ENV" \
+    && chown -R appuser:appgroup "$VIRTUAL_ENV"
 
-# Instalar dependencias del sistema
-RUN apt-get update && apt-get install -y \
-    --no-install-recommends \
-    gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-# Establecer directorio de trabajo
-WORKDIR /app
-
-# Copiar requirements y instalar dependencias Python
-COPY requirements.txt .
-RUN pip install --no-compile --upgrade pip \
-    && pip install --no-compile -r requirements.txt
-
-# Copiar código de la aplicación
-COPY . .
-
-# Crear directorios necesarios y ajustar permisos
-RUN mkdir -p /app/logs /app/tmp \
-    && chmod +x /app/scripts/init.sh \
-    && chown -R appuser:appgroup /app \
-    && chmod -R 755 /app \
-    && find /app -name "*.py" -exec chmod 644 {} \; \
-    && chmod +x /app/scripts/*.sh
-
-# Cambiar a usuario no-root
 USER appuser
+COPY --chown=appuser:appgroup requirements.txt /tmp/requirements.txt
+RUN python -m pip install --no-compile --upgrade pip \
+    && python -m pip install --no-compile -r /tmp/requirements.txt
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:5002/health || exit 1
+FROM python:3.11-slim AS runtime
 
-# Exponer puerto
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=5002
+
+RUN groupadd --system appgroup \
+    && useradd --system --gid appgroup --create-home appuser
+
+COPY --from=builder --chown=appuser:appgroup /opt/venv /opt/venv
+
+WORKDIR /app
+COPY --chown=appuser:appgroup . /app
+
+# Evita `/bin/sh\r: not found` aunque el checkout se haya hecho en Windows.
+RUN sed -i 's/\r$//' /app/scripts/*.sh \
+    && chmod 0555 /app/scripts/*.sh \
+    && install -d -o appuser -g appgroup -m 0750 /app/logs /app/tmp
+
+USER appuser:appgroup
+
 EXPOSE 5002
 
-# Configuración optimizada de Gunicorn para producción
-CMD ["gunicorn", \
-     "--bind", "0.0.0.0:5002", \
-     "--workers", "3", \
-     "--worker-class", "sync", \
-     "--worker-connections", "1000", \
-     "--timeout", "60", \
-     "--keep-alive", "2", \
-     "--max-requests", "1000", \
-     "--max-requests-jitter", "50", \
-     "--preload", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--log-level", "info", \
-     "app:create_app()"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=5)"]
+
+ENTRYPOINT ["/app/scripts/init.sh"]

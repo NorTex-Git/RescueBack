@@ -1,4 +1,4 @@
-from flask import jsonify, request
+from flask import g, jsonify, request
 from services.mqtt_alert_service import MqttAlertService
 from services.hardware_auth_service import HardwareAuthService
 from utils.auth_utils import get_auth_header, get_auth_cookie
@@ -6,6 +6,8 @@ from models.mqtt_alert import MqttAlert
 from datetime import datetime
 from bson import ObjectId
 from utils.geocoding import generar_url_google_maps, generar_url_openstreetmap
+import jwt
+from core.config import Config
 
 class MqttAlertController:
     """Controlador para gestionar las alertas MQTT"""
@@ -14,9 +16,30 @@ class MqttAlertController:
         self.service = MqttAlertService()
         self.hardware_auth_service = HardwareAuthService()
 
+    def _validate_empresa_identity(self, empresa_id):
+        """Las operaciones web de empresa deben coincidir con el JWT autenticado."""
+        auth_token = request.cookies.get('auth_token')
+        if not auth_token:
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                auth_token = auth_header[7:]
+        if not auth_token:
+            return jsonify({'success': False, 'error': 'Autenticación de empresa requerida'}), 401
+        try:
+            claims = jwt.decode(auth_token, Config.JWT_SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({'success': False, 'error': 'Token expirado'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'success': False, 'error': 'Token inválido'}), 401
+        if claims.get('role') != 'empresa' or str(claims.get('sub')) != str(empresa_id):
+            return jsonify({'success': False, 'error': 'La empresa autenticada no coincide con la operación solicitada'}), 403
+        return None
+
     def _post_internal_fanout(self, payload: dict, alert_id: str, evento: str) -> None:
         """POST fire-and-forget a MqttConnection. Un fallo aquí significa que el
         hardware NO se entera del evento, así que se registra como ERROR."""
+    def _notify_mqtt_fanout(self, alert_data: dict, alert_managers: list = None) -> None:
+        """Notificar a MqttConnection para fanout MQTT - fire and forget."""
         import threading
         import requests as _requests
         import logging as _logging
@@ -43,11 +66,11 @@ class MqttAlertController:
 
         threading.Thread(target=_fire, daemon=True).start()
 
-    def _notify_mqtt_fanout(self, alert_data: dict, alert_managers: list = None) -> None:
-        """Notificar a MqttConnection la ACTIVACIÓN de una alerta (fire and forget)"""
+        empresa_id = self._resolve_realtime_empresa_id(alert_data)
         payload = {
             'alert': alert_data,
-            'alert_managers': alert_managers or []
+            'alert_managers': alert_managers or [],
+            'empresa_id': empresa_id,
         }
         self._post_internal_fanout(
             payload=payload,
@@ -113,6 +136,42 @@ class MqttAlertController:
             alert_id=str(alert._id),
             evento='desactivacion'
         )
+
+    def _resolve_realtime_empresa_id(self, alert_data: dict):
+        """Resolver el tenant una vez para que el gateway pueda filtrar el evento."""
+        direct = alert_data.get('empresa_id')
+        if direct:
+            return str(direct)
+
+        activation = alert_data.get('activacion_alerta') or {}
+        if isinstance(activation, dict) and activation.get('empresa_id'):
+            return str(activation['empresa_id'])
+
+        empresa_nombre = alert_data.get('empresa_nombre')
+        if not empresa_nombre:
+            return None
+        try:
+            from repositories.empresa_repository import EmpresaRepository
+            empresa = EmpresaRepository().find_by_nombre(empresa_nombre)
+            return str(empresa._id) if empresa else None
+        except Exception:
+            return None
+
+    def _notify_realtime_event(self, payload: dict) -> None:
+        """Publicar un cambio persistido al fanout y al canal realtime."""
+        import threading
+        import requests as _requests
+        import logging as _logging
+        from core.config import Config
+
+        def _fire():
+            try:
+                url = f"{Config.MQTT_SERVICE_URL}/internal/fanout-alert"
+                _requests.post(url, json=payload, timeout=5)
+            except Exception as exc:
+                _logging.getLogger(__name__).warning("Evento realtime no disponible: %s", exc)
+
+        threading.Thread(target=_fire, daemon=True).start()
 
     def _build_alert_managers_payload(self, empresa_nombre: str, exclude_user_id: str = None) -> list:
         """Construye payload de managers para fanout (telefonos de usuarios is_alert_manager de toda la empresa).
@@ -910,6 +969,8 @@ class MqttAlertController:
             offset = int(request.args.get('offset', 0))
             page = (offset // limit) + 1  # Convertir offset a página
             empresa_id = request.args.get('empresaId')  # Filtro por empresa
+            if getattr(g, 'role', None) == 'empresa':
+                empresa_id = g.empresa_id
             
             print(f"🔍 DEBUG get_inactive_alerts:")
             print(f"  - limit: {limit}")
@@ -1041,26 +1102,27 @@ class MqttAlertController:
             result = self.service.get_alerts_active_by_empresa_sede(empresa_id, page, limit)
             
             if result['success']:
-                # Transformar la estructura para que coincida exactamente con lo solicitado
-                # Incluir campos específicos en formato de ejemplo
+                # Conservar el contrato completo; la UI necesita tipo, descripción,
+                # ubicación, creador y metadatos además del resumen.
                 transformed_data = []
                 for alert in result['data']:
-                    alert_dict = alert if isinstance(alert, dict) else alert
+                    alert_dict = dict(alert) if isinstance(alert, dict) else {}
                     
                     # Contar contactos - necesitamos buscar en la data para números telefónicos
                     contactos_count = 0
                     if isinstance(alert_dict.get('data'), dict):
                         numeros = alert_dict['data'].get('numeros_telefonicos', [])
-                        contactos_count = len(numeros) if numeros else 2  # Default según ejemplo
+                        contactos_count = len(numeros) if numeros else 0
                     
                     transformed_alert = {
+                        **alert_dict,
                         "_id": str(alert_dict.get('_id', '')),
-                        "hardware_nombre": alert_dict.get('hardware_nombre', 'Sensor Principal'),
+                        "hardware_nombre": alert_dict.get('hardware_nombre'),
                         "prioridad": alert_dict.get('prioridad', 'media'),
-                        "activo": alert_dict.get('estado_activo', True),
-                        "empresa_nombre": alert_dict.get('empresa_nombre', 'Nicolas Empresa'),
-                        "sede": alert_dict.get('sede', 'Secundaria'),
-                        "fecha_creacion": alert_dict.get('fecha_creacion', '2024-07-21T10:30:00Z'),
+                        "activo": bool(alert_dict.get('activo', True)),
+                        "empresa_nombre": alert_dict.get('empresa_nombre'),
+                        "sede": alert_dict.get('sede'),
+                        "fecha_creacion": alert_dict.get('fecha_creacion'),
                         "contactos_count": contactos_count
                     }
                     transformed_data.append(transformed_alert)
@@ -1159,6 +1221,11 @@ class MqttAlertController:
                     'success': False,
                     'error': f'Tipo de creador inválido. Tipos válidos: {tipos_creador_validos}'
                 }), 400
+
+            if tipo_creador == 'empresa':
+                identity_error = self._validate_empresa_identity(creador.get('empresa_id'))
+                if identity_error:
+                    return identity_error
             
             # Validaciones específicas según el tipo de creador
             if tipo_creador == 'usuario':
@@ -1598,6 +1665,11 @@ class MqttAlertController:
             alert_id = alert_id.strip()
             desactivado_por_id = desactivado_por_id.strip()
             desactivado_por_tipo = desactivado_por_tipo.strip().lower()
+
+            if desactivado_por_tipo == 'empresa':
+                identity_error = self._validate_empresa_identity(desactivado_por_id)
+                if identity_error:
+                    return identity_error
             
             # Validar y limpiar mensaje_desactivacion si se proporciona (campo opcional)
             if mensaje_desactivacion is not None:
@@ -1800,7 +1872,6 @@ class MqttAlertController:
                     alert.empresa_nombre,
                     exclude_user_id=desactivado_por_id
                 )
-
                 desactivado_por_payload = {
                     'id': desactivado_por_id,
                     'tipo': desactivado_por_tipo,
@@ -1817,7 +1888,13 @@ class MqttAlertController:
                     desactivado_por=desactivado_por_payload,
                     alert_managers=alert_managers_payload
                 )
-
+                self._notify_realtime_event({
+                    'type': 'alert_deactivated_by_empresa',
+                    'alert': alert.to_json(),
+                    'alert_id': str(alert._id),
+                    'empresa_id': self._resolve_realtime_empresa_id(alert.to_json()),
+                    'alert_managers': alert_managers_payload,
+                })
                 return jsonify({
                     'success': True,
                     'message': 'Alerta desactivada exitosamente',

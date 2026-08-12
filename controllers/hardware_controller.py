@@ -171,6 +171,14 @@ class HardwareController:
             physical_status = data.get('physical_status')
             result = self.service.update_physical_status(empresa_nombre, hardware_nombre, physical_status)
             if result.get('success'):
+                hardware = result.get('data') or {}
+                from utils.realtime_publisher import publish_realtime_event
+                publish_realtime_event({
+                    'type': 'hardware.status.changed',
+                    'empresaId': hardware.get('empresa_id'),
+                    'entityId': hardware.get('_id'),
+                    'payload': {'hardware': hardware},
+                })
                 return jsonify(result), 200
             if 'Hardware no encontrado' in result.get('errors', []):
                 return jsonify(result), 404

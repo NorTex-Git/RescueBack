@@ -84,8 +84,7 @@ def crear_super_admin():
             print("✅ Usuario super administrador creado exitosamente!")
             print(f"   Username: {username}")
             print(f"   Email: {email}")
-            print(f"   Password: {password}")
-            print(f"   ID: {result.inserted_id}")
+            print("   Password: [oculta; configurada mediante ADMIN_PASSWORD]")
             print("⚠️  IMPORTANTE: Cambia la contraseña después del primer login!")
             return True
         else:

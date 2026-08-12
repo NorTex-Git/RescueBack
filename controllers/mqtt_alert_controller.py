@@ -38,8 +38,6 @@ class MqttAlertController:
     def _post_internal_fanout(self, payload: dict, alert_id: str, evento: str) -> None:
         """POST fire-and-forget a MqttConnection. Un fallo aquí significa que el
         hardware NO se entera del evento, así que se registra como ERROR."""
-    def _notify_mqtt_fanout(self, alert_data: dict, alert_managers: list = None) -> None:
-        """Notificar a MqttConnection para fanout MQTT - fire and forget."""
         import threading
         import requests as _requests
         import logging as _logging
@@ -66,6 +64,8 @@ class MqttAlertController:
 
         threading.Thread(target=_fire, daemon=True).start()
 
+    def _notify_mqtt_fanout(self, alert_data: dict, alert_managers: list = None) -> None:
+        """Notificar a MqttConnection para fanout MQTT - fire and forget."""
         empresa_id = self._resolve_realtime_empresa_id(alert_data)
         payload = {
             'alert': alert_data,
@@ -166,8 +166,14 @@ class MqttAlertController:
 
         def _fire():
             try:
-                url = f"{Config.MQTT_SERVICE_URL}/internal/fanout-alert"
-                _requests.post(url, json=payload, timeout=5)
+                url = f"{Config.MQTT_SERVICE_URL}/internal/realtime-event"
+                response = _requests.post(url, json=payload, timeout=5)
+                if response.status_code != 200:
+                    _logging.getLogger(__name__).warning(
+                        "Evento realtime rechazado: HTTP %s %s",
+                        response.status_code,
+                        response.text[:300],
+                    )
             except Exception as exc:
                 _logging.getLogger(__name__).warning("Evento realtime no disponible: %s", exc)
 

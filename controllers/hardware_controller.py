@@ -7,6 +7,28 @@ class HardwareController:
     def __init__(self):
         self.service = HardwareService()
 
+    @staticmethod
+    def _publish_stale_hardware_events(result):
+        if not result.get('success'):
+            return
+        from utils.realtime_publisher import publish_realtime_event
+        for hardware in result.get('data') or []:
+            publish_realtime_event({
+                'type': 'hardware.status.changed',
+                'empresaId': hardware.get('empresa_id'),
+                'entityId': hardware.get('_id'),
+                'payload': {
+                    'hardware': hardware,
+                    'reason': 'heartbeat_timeout',
+                },
+            })
+
+    def _run_physical_status_check(self, empresa_id=None):
+        result = self.service.check_physical_status_stale(empresa_id)
+        self._publish_stale_hardware_events(result)
+        status = 200 if result.get('success') else 500
+        return jsonify(result), status
+
     @require_super_admin_token
     def create_hardware(self):
         try:
@@ -172,13 +194,18 @@ class HardwareController:
             result = self.service.update_physical_status(empresa_nombre, hardware_nombre, physical_status)
             if result.get('success'):
                 hardware = result.get('data') or {}
-                from utils.realtime_publisher import publish_realtime_event
-                publish_realtime_event({
-                    'type': 'hardware.status.changed',
-                    'empresaId': hardware.get('empresa_id'),
-                    'entityId': hardware.get('_id'),
-                    'payload': {'hardware': hardware},
-                })
+                if result.get('status_changed'):
+                    from utils.realtime_publisher import publish_realtime_event
+                    publish_realtime_event({
+                        'type': 'hardware.status.changed',
+                        'empresaId': hardware.get('empresa_id'),
+                        'entityId': hardware.get('_id'),
+                        'payload': {
+                            'hardware': hardware,
+                            'previousStatus': result.get('previous_state'),
+                            'reason': 'status_received',
+                        },
+                    })
                 return jsonify(result), 200
             if 'Hardware no encontrado' in result.get('errors', []):
                 return jsonify(result), 404
@@ -191,8 +218,14 @@ class HardwareController:
         """Revisar hardware vencido y marcar estado inactivo"""
         try:
             empresa_id = g.user_id if g.role == 'empresa' else None
-            result = self.service.check_physical_status_stale(empresa_id)
-            status = 200 if result.get('success') else 500
-            return jsonify(result), status
+            return self._run_physical_status_check(empresa_id)
+        except Exception as exc:
+            return jsonify({'success': False, 'errors': [str(exc)]}), 500
+
+    @require_internal_token
+    def sweep_physical_status_stale(self):
+        """Barrido global invocado por el servicio interno de comunicacion."""
+        try:
+            return self._run_physical_status_check()
         except Exception as exc:
             return jsonify({'success': False, 'errors': [str(exc)]}), 500

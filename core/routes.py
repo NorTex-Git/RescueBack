@@ -184,6 +184,11 @@ def check_physical_status_stale():
     """POST /api/hardware/physical-status/check - Marcar hardware con status vencido"""
     return hardware_controller.check_physical_status_stale()
 
+@hardware_bp.route('/physical-status/sweep', methods=['POST'])
+def sweep_physical_status_stale():
+    """POST interno - Ejecutar el barrido global de estados fisicos vencidos."""
+    return hardware_controller.sweep_physical_status_stale()
+
 @hardware_bp.route('/all-including-inactive', methods=['GET'])
 def get_all_hardware_including_inactive():
     """GET /api/hardware/all-including-inactive - Obtener todos los hardware incluyendo inactivos"""

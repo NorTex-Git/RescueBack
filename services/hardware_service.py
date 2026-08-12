@@ -1,5 +1,5 @@
 from bson import ObjectId
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models.hardware import Hardware
 from repositories.hardware_repository import HardwareRepository
 from repositories.empresa_repository import EmpresaRepository
@@ -362,18 +362,26 @@ class HardwareService:
                 return {'success': False, 'errors': ['physical_status debe ser un objeto JSON']}
 
             physical_status['updated_at'] = datetime.utcnow().isoformat()
-            updated = self.hardware_repo.update_physical_status_by_empresa_hardware(
+            update_result = self.hardware_repo.update_physical_status_by_empresa_hardware(
                 empresa_nombre,
                 hardware_nombre,
                 physical_status
             )
-            if not updated:
+            if not update_result:
                 return {'success': False, 'errors': ['Hardware no encontrado']}
+            updated, previous_status = update_result
 
             result = updated.to_json()
             empresa = self.empresa_repo.find_by_id(updated.empresa_id) if updated.empresa_id else None
             result['empresa_nombre'] = empresa.nombre if empresa else None
-            return {'success': True, 'data': result}
+            previous_state = str((previous_status or {}).get('estado') or '').strip().lower()
+            current_state = str(physical_status.get('estado') or '').strip().lower()
+            return {
+                'success': True,
+                'data': result,
+                'status_changed': previous_state != current_state,
+                'previous_state': (previous_status or {}).get('estado'),
+            }
         except Exception as exc:
             return {'success': False, 'errors': [str(exc)]}
 
@@ -408,30 +416,23 @@ class HardwareService:
                 if isinstance(updated_at, str):
                     try:
                         last_update = datetime.fromisoformat(updated_at)
+                        if last_update.tzinfo is not None:
+                            last_update = last_update.astimezone(timezone.utc).replace(tzinfo=None)
                     except ValueError:
                         last_update = None
 
                 is_stale = not last_update or (now - last_update) > timedelta(seconds=stale_seconds)
-                should_update = False
-                if isinstance(estado_actual, str) and estado_actual.strip().lower() == 'desactivado':
-                    physical_status['estado'] = 'Inactivo'
-                    should_update = True
-                elif is_stale:
-                    if physical_status.get('estado') != 'Inactivo':
-                        physical_status['estado'] = 'Inactivo'
-                    should_update = True
-                if not should_update:
+                normalized_state = estado_actual.strip().lower() if isinstance(estado_actual, str) else ''
+                should_be_inactive = normalized_state == 'desactivado' or is_stale
+                if not should_be_inactive or normalized_state == 'inactivo':
                     continue
+                physical_status['estado'] = 'Inactivo'
                 updated = self.hardware_repo.update_physical_status_by_id(hardware._id, physical_status)
                 if updated:
                     empresa = self.empresa_repo.find_by_id(updated.empresa_id) if updated.empresa_id else None
-                    updated_hardware.append({
-                        '_id': str(updated._id) if updated._id else None,
-                        'nombre': updated.nombre,
-                        'empresa_nombre': empresa.nombre if empresa else None,
-                        'sede': updated.sede,
-                        'estado': (updated.physical_status or {}).get('estado')
-                    })
+                    hardware_data = updated.to_json()
+                    hardware_data['empresa_nombre'] = empresa.nombre if empresa else None
+                    updated_hardware.append(hardware_data)
 
             return {'success': True, 'data': updated_hardware, 'count': len(updated_hardware)}
         except Exception as exc:

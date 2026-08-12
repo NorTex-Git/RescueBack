@@ -252,10 +252,13 @@ class HardwareRepository:
                 'empresa_id': empresa.get('_id'),
                 'nombre': hardware_nombre
             }
+            previous = self.collection.find_one(query)
             result = self.collection.update_one(query, {'$set': update_data})
             if result.matched_count > 0:
                 data = self.collection.find_one(query)
-                return Hardware.from_dict(data) if data else None
+                if not data:
+                    return None
+                return Hardware.from_dict(data), (previous or {}).get('physical_status') or {}
             return None
         except Exception as exc:
             raise Exception(f'Error actualizando physical_status por empresa/hardware: {str(exc)}')

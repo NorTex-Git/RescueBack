@@ -8,6 +8,8 @@ from bson import ObjectId
 from utils.geocoding import generar_url_google_maps, generar_url_openstreetmap
 import jwt
 from core.config import Config
+from utils.realtime_publisher import publish_realtime_event
+import uuid
 
 class MqttAlertController:
     """Controlador para gestionar las alertas MQTT"""
@@ -41,26 +43,30 @@ class MqttAlertController:
         import threading
         import requests as _requests
         import logging as _logging
+        import time as _time
         from core.config import Config
 
         logger = _logging.getLogger(__name__)
 
         def _fire():
             url = f"{Config.MQTT_SERVICE_URL}/internal/fanout-alert"
-            try:
-                response = _requests.post(url, json=payload, timeout=Config.MQTT_SERVICE_TIMEOUT)
-                if response.status_code != 200:
+            for attempt in range(1, 4):
+                try:
+                    response = _requests.post(url, json=payload, timeout=Config.MQTT_SERVICE_TIMEOUT)
+                    if response.status_code == 200:
+                        logger.info("Fanout MQTT (%s) enviado para alerta %s", evento, alert_id)
+                        return
                     logger.error(
-                        "Fanout MQTT (%s) rechazado para alerta %s: HTTP %s %s",
-                        evento, alert_id, response.status_code, response.text[:300]
+                        "Fanout MQTT (%s) rechazado para alerta %s (intento %s/3): HTTP %s %s",
+                        evento, alert_id, attempt, response.status_code, response.text[:300]
                     )
-                else:
-                    logger.info("Fanout MQTT (%s) enviado para alerta %s", evento, alert_id)
-            except Exception as e:
-                logger.error(
-                    "Fanout MQTT (%s) FALLÓ para alerta %s en %s: %s — el hardware no fue notificado",
-                    evento, alert_id, url, e
-                )
+                except Exception as e:
+                    logger.error(
+                        "Fanout MQTT (%s) falló para alerta %s en %s (intento %s/3): %s",
+                        evento, alert_id, url, attempt, e
+                    )
+                if attempt < 3:
+                    _time.sleep(attempt)
 
         threading.Thread(target=_fire, daemon=True).start()
 
@@ -71,6 +77,7 @@ class MqttAlertController:
             'alert': alert_data,
             'alert_managers': alert_managers or [],
             'empresa_id': empresa_id,
+            'event_id': str(uuid.uuid4()),
         }
         self._post_internal_fanout(
             payload=payload,
@@ -114,6 +121,9 @@ class MqttAlertController:
         payload = {
             'type': 'alert_deactivated_by_empresa',
             'timestamp': datetime.utcnow().isoformat(),
+            'event_id': str(uuid.uuid4()),
+            'empresa_id': self._resolve_realtime_empresa_id(alert.to_json()),
+            'alert_id': str(alert._id),
             'alert': {
                 'id': str(alert._id),
                 'nombre': alert.nombre_alerta or alert.tipo_alerta or 'Alerta',
@@ -1072,6 +1082,23 @@ class MqttAlertController:
             result = self.service.update_alert_user_status(alert_id, usuario_id, update_data)
             
             if result['success']:
+                alert_data = result.get('alert') or {}
+                participant = next(
+                    (
+                        item for item in alert_data.get('numeros_telefonicos', [])
+                        if str(item.get('usuario_id')) == str(usuario_id)
+                    ),
+                    {'usuario_id': str(usuario_id), **update_data},
+                )
+                publish_realtime_event({
+                    'type': 'alert.participant.status.changed',
+                    'empresaId': self._resolve_realtime_empresa_id(alert_data),
+                    'entityId': str(alert_id),
+                    'payload': {
+                        'alert': alert_data,
+                        'participant': participant,
+                    },
+                })
                 return jsonify(result), 200
             else:
                 return jsonify(result), 404 if 'not found' in result.get('error', '').lower() else 400
@@ -1894,13 +1921,6 @@ class MqttAlertController:
                     desactivado_por=desactivado_por_payload,
                     alert_managers=alert_managers_payload
                 )
-                self._notify_realtime_event({
-                    'type': 'alert_deactivated_by_empresa',
-                    'alert': alert.to_json(),
-                    'alert_id': str(alert._id),
-                    'empresa_id': self._resolve_realtime_empresa_id(alert.to_json()),
-                    'alert_managers': alert_managers_payload,
-                })
                 return jsonify({
                     'success': True,
                     'message': 'Alerta desactivada exitosamente',

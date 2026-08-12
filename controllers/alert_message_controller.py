@@ -2,7 +2,9 @@ from flask import jsonify, request
 
 from models.alert_message import AlertMessage
 from repositories.alert_message_repository import AlertMessageRepository
+from repositories.empresa_repository import EmpresaRepository
 from repositories.mqtt_alert_repository import MqttAlertRepository
+from utils.realtime_publisher import publish_realtime_event
 
 
 class AlertMessageController:
@@ -49,7 +51,19 @@ class AlertMessageController:
                 is_navigation=bool(data.get('is_navigation', False))
             )
             created = self.repo.create(message)
-            return jsonify({'success': True, 'message': created.to_json()}), 201
+            created_data = created.to_json()
+            if not created.is_template and not created.is_navigation:
+                empresa = EmpresaRepository().find_by_nombre(alert.empresa_nombre)
+                publish_realtime_event({
+                    'type': 'alert.message.created',
+                    'empresaId': str(empresa._id) if empresa else None,
+                    'entityId': str(alert._id),
+                    'payload': {
+                        'alertId': str(alert._id),
+                        'message': created_data,
+                    },
+                })
+            return jsonify({'success': True, 'message': created_data}), 201
         except Exception as e:
             return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
 

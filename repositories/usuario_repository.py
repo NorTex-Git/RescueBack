@@ -30,18 +30,44 @@ class UsuarioRepository:
     def _build_phone_or_query(self, field_name, value):
         if value is None:
             return []
-        clauses = []
         value_str = str(value).strip()
         if not value_str:
             return []
-        clauses.append({field_name: value_str})
-        if value_str.isdigit():
-            try:
-                clauses.append({field_name: int(value_str)})
-            except ValueError:
-                pass
-        escaped = re.escape(value_str)
-        clauses.append({field_name: {"$regex": f"^\\s*{escaped}\\s*$"}})
+
+        # WhatsApp entrega los números colombianos con el prefijo 57, mientras
+        # que los usuarios históricos pueden estar guardados con los 10 dígitos
+        # nacionales. Consultar ambas formas evita falsos "no registrado".
+        digits = re.sub(r"\D", "", value_str)
+        if digits.startswith("00"):
+            digits = digits[2:]
+
+        variants = [value_str]
+        if digits:
+            variants.append(digits)
+            if len(digits) == 12 and digits.startswith("57"):
+                variants.append(digits[2:])
+            elif len(digits) == 10 and digits.startswith("3"):
+                variants.append(f"57{digits}")
+
+        clauses = []
+        for variant in dict.fromkeys(variants):
+            clauses.append({field_name: variant})
+            if variant.isdigit():
+                try:
+                    clauses.append({field_name: int(variant)})
+                except ValueError:
+                    pass
+
+                # También admite formatos persistidos como +57 310-123-4567.
+                separator = r"[\s().-]*"
+                formatted = separator.join(re.escape(char) for char in variant)
+                clauses.append({field_name: {"$regex": f"^\\s*\\+?{formatted}\\s*$"}})
+
+        # Conserva compatibilidad para valores no numéricos o formatos atípicos.
+        if not digits:
+            escaped = re.escape(value_str)
+            clauses.append({field_name: {"$regex": f"^\\s*{escaped}\\s*$"}})
+
         return clauses
     
     def _create_indexes(self):

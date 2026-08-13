@@ -525,6 +525,11 @@ def send_alert_group_message(alert_id):
     """POST /api/mqtt-alerts/<alert_id>/messages/send - La empresa escribe al grupo de la alerta"""
     return alert_message_controller.send_group_message(alert_id)
 
+@mqtt_alert_bp.route('/media/<file_id>', methods=['GET'])
+def serve_alert_media(file_id):
+    """GET /api/mqtt-alerts/media/<file_id> - Sirve un archivo multimedia de la conversación (GridFS)"""
+    return alert_message_controller.serve_media(file_id)
+
 # ========== BLUEPRINT DE BÚSQUEDA POR TELÉFONO ==========
 from controllers.phone_lookup_controller import PhoneLookupController
 phone_lookup_bp = Blueprint('phone_lookup', __name__, url_prefix='/api/phone-lookup')

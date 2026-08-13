@@ -13,9 +13,11 @@ class WhatsAppServiceClient:
         self.send_message_endpoint = f"{self.api_base_url}/send-message"
         self.timeout = Config.WHATSAPP_SERVICE_TIMEOUT
 
-    def send_text_message(self, phone, message, use_queue=False):
+    def send_text_message(self, phone, message, use_queue=False, context_message_id=None):
         """Envía un mensaje de texto libre a un número vía el servicio de WhatsApp.
 
+        `context_message_id`: wamid del mensaje que se está respondiendo (para que
+        WhatsApp muestre la cita).
         Nota: WhatsApp sólo permite texto libre dentro de la ventana de 24h de la
         conversación; fuera de ella el servicio responderá error (requiere plantilla).
         """
@@ -25,6 +27,8 @@ class WhatsAppServiceClient:
             return {"success": False, "error": "phone y message son requeridos", "data": None}
 
         payload = {"phone": phone, "message": message, "use_queue": use_queue}
+        if context_message_id:
+            payload["context_message_id"] = context_message_id
         headers = {"Content-Type": "application/json"}
         try:
             response = requests.post(

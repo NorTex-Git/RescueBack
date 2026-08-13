@@ -30,6 +30,31 @@ class AlertMessageRepository:
         self.collection.insert_one(message.to_dict())
         return message
 
+    def find_by_id(self, message_id):
+        """Devuelve un mensaje por su _id interno, o None."""
+        try:
+            doc = self.collection.find_one({'_id': ObjectId(message_id)})
+        except Exception:
+            doc = self.collection.find_one({'_id': message_id})
+        return AlertMessage.from_dict(doc) if doc else None
+
+    def find_by_wa_id(self, alert_id, wa_message_id):
+        """Busca un mensaje por su wamid dentro de una alerta.
+
+        Matchea tanto el wamid único (entrante) como la lista de wamids por contacto
+        (mensaje saliente al grupo), para resolver la cita responda quien responda.
+        """
+        if not wa_message_id:
+            return None
+        doc = self.collection.find_one({
+            'alert_id': self._coerce_alert_id(alert_id),
+            '$or': [
+                {'wa_message_id': wa_message_id},
+                {'wa_recipients.wa_message_id': wa_message_id},
+            ],
+        })
+        return AlertMessage.from_dict(doc) if doc else None
+
     def find_by_alert(self, alert_id, direction=None, limit=15, include_templates=False, include_navigation=False):
         """Devuelve los últimos `limit` mensajes ordenados por fecha asc para mostrar al usuario."""
         query = {'alert_id': self._coerce_alert_id(alert_id)}

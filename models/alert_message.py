@@ -11,7 +11,8 @@ class AlertMessage:
     def __init__(self, alert_id=None, phone=None, direction=None, type=None,
                  body=None, payload=None, user_id=None, user_name=None,
                  user_role=None, is_template=False, is_navigation=False,
-                 fecha=None, _id=None):
+                 fecha=None, media_url=None, mime_type=None,
+                 wa_message_id=None, wa_recipients=None, reply_to=None, _id=None):
         self._id = _id or ObjectId()
         self.alert_id = alert_id
         self.phone = phone
@@ -25,6 +26,16 @@ class AlertMessage:
         self.is_template = bool(is_template)
         self.is_navigation = bool(is_navigation)
         self.fecha = fecha or datetime.utcnow()
+        # Media descargada de WhatsApp y servida por RescueBack (imagen/audio/video/sticker).
+        self.media_url = media_url
+        self.mime_type = mime_type
+        # Threading: id de mensaje de WhatsApp (wamid) y cita del mensaje respondido.
+        # Entrante: `wa_message_id` (uno). Saliente al grupo: `wa_recipients` con un
+        # {phone, wa_message_id} por contacto (WhatsApp es 1:1, cada uno recibe su wamid),
+        # necesario para citar al responder y para resolver quién respondió a qué.
+        self.wa_message_id = wa_message_id
+        self.wa_recipients = wa_recipients or []
+        self.reply_to = reply_to
 
     def to_dict(self):
         return {
@@ -40,7 +51,12 @@ class AlertMessage:
             'user_role': self.user_role,
             'is_template': self.is_template,
             'is_navigation': self.is_navigation,
-            'fecha': self.fecha
+            'fecha': self.fecha,
+            'media_url': self.media_url,
+            'mime_type': self.mime_type,
+            'wa_message_id': self.wa_message_id,
+            'wa_recipients': self.wa_recipients,
+            'reply_to': self.reply_to
         }
 
     def to_json(self):
@@ -57,7 +73,12 @@ class AlertMessage:
             'user_role': self.user_role,
             'is_template': self.is_template,
             'is_navigation': self.is_navigation,
-            'fecha': self.fecha.isoformat() if isinstance(self.fecha, datetime) else self.fecha
+            'fecha': self.fecha.isoformat() if isinstance(self.fecha, datetime) else self.fecha,
+            'media_url': self.media_url,
+            'mime_type': self.mime_type,
+            'wa_message_id': self.wa_message_id,
+            'wa_recipients': self.wa_recipients,
+            'reply_to': self.reply_to
         }
 
     @classmethod
@@ -77,5 +98,10 @@ class AlertMessage:
             user_role=data.get('user_role', ''),
             is_template=bool(data.get('is_template', False)),
             is_navigation=bool(data.get('is_navigation', False)),
-            fecha=data.get('fecha')
+            fecha=data.get('fecha'),
+            media_url=data.get('media_url'),
+            mime_type=data.get('mime_type'),
+            wa_message_id=data.get('wa_message_id'),
+            wa_recipients=data.get('wa_recipients'),
+            reply_to=data.get('reply_to')
         )

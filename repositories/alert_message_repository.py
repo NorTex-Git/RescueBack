@@ -55,6 +55,36 @@ class AlertMessageRepository:
         })
         return AlertMessage.from_dict(doc) if doc else None
 
+    def add_recipients(self, alert_id, origin_wa_message_id, recipients):
+        """Agrega wamids de reenvío ({phone, wa_message_id}) al mensaje de origen.
+
+        El mensaje se localiza por su wamid de autor. Devuelve True si lo encontró y
+        actualizó, False si aún no existe (para que el emisor reintente). No duplica por
+        teléfono (conserva el primero registrado).
+        """
+        if not origin_wa_message_id or not recipients:
+            return False
+        query = {
+            'alert_id': self._coerce_alert_id(alert_id),
+            'wa_message_id': origin_wa_message_id,
+        }
+        doc = self.collection.find_one(query, {'wa_recipients': 1})
+        if not doc:
+            return False
+        existing = doc.get('wa_recipients') or []
+        known_phones = {self._digits(r.get('phone')) for r in existing}
+        nuevos = [
+            r for r in recipients
+            if r.get('wa_message_id') and self._digits(r.get('phone')) not in known_phones
+        ]
+        if nuevos:
+            self.collection.update_one(query, {'$push': {'wa_recipients': {'$each': nuevos}}})
+        return True
+
+    @staticmethod
+    def _digits(value):
+        return ''.join(ch for ch in str(value or '') if ch.isdigit())
+
     def find_by_alert(self, alert_id, direction=None, limit=15, include_templates=False, include_navigation=False):
         """Devuelve los últimos `limit` mensajes ordenados por fecha asc para mostrar al usuario."""
         query = {'alert_id': self._coerce_alert_id(alert_id)}

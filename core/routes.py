@@ -530,6 +530,16 @@ def serve_alert_media(file_id):
     """GET /api/mqtt-alerts/media/<file_id> - Sirve un archivo multimedia de la conversación (GridFS)"""
     return alert_message_controller.serve_media(file_id)
 
+@mqtt_alert_bp.route('/<alert_id>/messages/recipients', methods=['POST'])
+def add_alert_message_recipients(alert_id):
+    """POST /api/mqtt-alerts/<alert_id>/messages/recipients - Adjunta wamids de reenvío al mensaje"""
+    return alert_message_controller.add_message_recipients(alert_id)
+
+@mqtt_alert_bp.route('/<alert_id>/messages/context-map', methods=['GET'])
+def alert_message_context_map(alert_id):
+    """GET /api/mqtt-alerts/<alert_id>/messages/context-map?wamid=<quoted> - Mapa phone->wamid del citado"""
+    return alert_message_controller.get_context_map(alert_id)
+
 # ========== BLUEPRINT DE BÚSQUEDA POR TELÉFONO ==========
 from controllers.phone_lookup_controller import PhoneLookupController
 phone_lookup_bp = Blueprint('phone_lookup', __name__, url_prefix='/api/phone-lookup')

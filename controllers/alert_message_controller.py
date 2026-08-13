@@ -75,16 +75,16 @@ class AlertMessageController:
     def _context_for_recipient(self, quoted, numero):
         """wamid válido para citar `quoted` en la conversación 1:1 de `numero`.
 
-        - Si el citado es entrante: solo su remitente (`quoted.phone`) tiene ese wamid.
-        - Si el citado es saliente al grupo: cada contacto tiene su propio wamid en
-          `wa_recipients`.
+        Cada miembro tiene su propia copia (WhatsApp es 1:1):
+        - El autor de un mensaje entrante tiene el wamid principal (`quoted.phone`).
+        - El resto tiene su copia reenviada / recibida en `wa_recipients`.
         Devuelve None si `numero` no posee ese mensaje (se envía sin cita para no fallar).
         """
         if not quoted:
             return None
         target = self._digits(numero)
-        if quoted.direction == AlertMessage.DIRECTION_IN:
-            return quoted.wa_message_id if self._digits(quoted.phone) == target else None
+        if quoted.direction == AlertMessage.DIRECTION_IN and self._digits(quoted.phone) == target:
+            return quoted.wa_message_id
         for rec in (quoted.wa_recipients or []):
             if self._digits(rec.get('phone')) == target:
                 return rec.get('wa_message_id')
@@ -280,6 +280,48 @@ class AlertMessageController:
                 'enviados': enviados,
                 'fallidos': fallidos,
             }), 201
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
+
+    def add_message_recipients(self, alert_id):
+        """POST /api/mqtt-alerts/<alert_id>/messages/recipients
+
+        Adjunta los wamids de las copias reenviadas (uno por miembro) al mensaje de
+        origen, para que la respuesta se vea como reply nativo para todo el grupo.
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            origin = data.get('origin_wa_message_id')
+            recipients = data.get('recipients') or []
+            if not origin or not isinstance(recipients, list):
+                return jsonify({'success': False, 'error': 'origin_wa_message_id y recipients requeridos'}), 400
+            found = self.repo.add_recipients(alert_id, origin, recipients)
+            if not found:
+                return jsonify({'success': False, 'error': 'Mensaje de origen no encontrado'}), 404
+            return jsonify({'success': True}), 200
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
+
+    def get_context_map(self, alert_id):
+        """GET /api/mqtt-alerts/<alert_id>/messages/context-map?wamid=<quoted>
+
+        Devuelve {digits(phone): wamid} del mensaje citado (identificado por el wamid de
+        cualquiera de sus copias), para que MQTTArisma reenvíe la respuesta con el
+        `context` correcto en la conversación 1:1 de cada miembro.
+        """
+        try:
+            wamid = request.args.get('wamid')
+            if not wamid:
+                return jsonify({'success': False, 'error': 'wamid requerido'}), 400
+            msg = self.repo.find_by_wa_id(alert_id, wamid)
+            mapa = {}
+            if msg:
+                if msg.direction == AlertMessage.DIRECTION_IN and msg.wa_message_id:
+                    mapa[self._digits(msg.phone)] = msg.wa_message_id
+                for rec in (msg.wa_recipients or []):
+                    if rec.get('wa_message_id'):
+                        mapa[self._digits(rec.get('phone'))] = rec.get('wa_message_id')
+            return jsonify({'success': True, 'map': mapa}), 200
         except Exception as e:
             return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
 

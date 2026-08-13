@@ -10,6 +10,7 @@ from services.tipo_empresa_service import TipoEmpresaService
 from repositories.empresa_repository import EmpresaRepository
 from repositories.usuario_repository import UsuarioRepository
 from repositories.hardware_repository import HardwareRepository
+from repositories.mqtt_alert_repository import MqttAlertRepository
 from repositories.activity_repository import ActivityRepository
 from repositories.session_repository import SessionRepository
 from utils.performance_metrics import get_performance_metrics
@@ -28,6 +29,36 @@ class SuperAdminDashboardService:
         self.hardware_repository = HardwareRepository()
         self.activity_repository = ActivityRepository()
         self.session_repository = SessionRepository()
+        self.alert_repository = MqttAlertRepository()
+
+    def _get_alerts_stats(self, days=30):
+        """Total de alertas y desglose por severidad de los últimos `days` días."""
+        por = {'critica': 0, 'alta': 0, 'media': 0, 'baja': 0}
+        try:
+            since = datetime.utcnow() - timedelta(days=days)
+            pipeline = [
+                {'$match': {'fecha_creacion': {'$gte': since}}},
+                {'$group': {
+                    '_id': {'$toLower': {'$ifNull': ['$prioridad', 'media']}},
+                    'n': {'$sum': 1},
+                }},
+            ]
+            total = 0
+            for row in self.alert_repository.collection.aggregate(pipeline):
+                key = (row.get('_id') or 'media')
+                n = row.get('n', 0)
+                total += n
+                if 'crit' in key:
+                    por['critica'] += n
+                elif 'alta' in key:
+                    por['alta'] += n
+                elif 'baja' in key:
+                    por['baja'] += n
+                else:
+                    por['media'] += n
+            return {'total': total, 'por_severidad': por}
+        except Exception:
+            return {'total': 0, 'por_severidad': por}
 
     def get_dashboard_stats(self):
         """Obtiene estadísticas generales del dashboard"""
@@ -45,14 +76,20 @@ class SuperAdminDashboardService:
             performance = random.randint(75, 95)
             avg_performance = random.randint(65, 85)
             
+            alerts_stats = self._get_alerts_stats(30)
+
             if empresas_stats['success'] and users_stats['success'] and hardware_stats['success']:
                 data = {
                     'total_empresas': empresas_stats['data']['total_general'],
                     'active_empresas': empresas_stats['data']['total_activas'],
                     'total_users': users_stats['data']['total'],
+                    # Alias que espera el frontend del dashboard.
+                    'total_usuarios': users_stats['data']['total'],
                     'active_users': users_stats['data']['active'],
                     'total_hardware': hardware_stats['data']['total_items'],
                     'available_hardware': hardware_stats['data']['available_items'],
+                    'total_alertas': alerts_stats['total'],
+                    'alertas_por_severidad': alerts_stats['por_severidad'],
                     'performance': performance,
                     'avg_performance': avg_performance
                 }

@@ -1,33 +1,11 @@
-from flask import request, jsonify, g
+from flask import request, jsonify
 from services.hardware_service import HardwareService
 from decorators.internal_token_decorator import require_internal_token
-from utils.permissions import require_empresa_or_admin_token, require_super_admin_token
+from utils.permissions import require_super_admin_token
 
 class HardwareController:
     def __init__(self):
         self.service = HardwareService()
-
-    @staticmethod
-    def _publish_stale_hardware_events(result):
-        if not result.get('success'):
-            return
-        from utils.realtime_publisher import publish_realtime_event
-        for hardware in result.get('data') or []:
-            publish_realtime_event({
-                'type': 'hardware.status.changed',
-                'empresaId': hardware.get('empresa_id'),
-                'entityId': hardware.get('_id'),
-                'payload': {
-                    'hardware': hardware,
-                    'reason': 'heartbeat_timeout',
-                },
-            })
-
-    def _run_physical_status_check(self, empresa_id=None):
-        result = self.service.check_physical_status_stale(empresa_id)
-        self._publish_stale_hardware_events(result)
-        status = 200 if result.get('success') else 500
-        return jsonify(result), status
 
     @require_super_admin_token
     def create_hardware(self):
@@ -213,19 +191,3 @@ class HardwareController:
         except Exception as exc:
             return jsonify({'success': False, 'errors': [str(exc)]}), 500
 
-    @require_empresa_or_admin_token
-    def check_physical_status_stale(self):
-        """Revisar hardware vencido y marcar estado inactivo"""
-        try:
-            empresa_id = g.user_id if g.role == 'empresa' else None
-            return self._run_physical_status_check(empresa_id)
-        except Exception as exc:
-            return jsonify({'success': False, 'errors': [str(exc)]}), 500
-
-    @require_internal_token
-    def sweep_physical_status_stale(self):
-        """Barrido global invocado por el servicio interno de comunicacion."""
-        try:
-            return self._run_physical_status_check()
-        except Exception as exc:
-            return jsonify({'success': False, 'errors': [str(exc)]}), 500

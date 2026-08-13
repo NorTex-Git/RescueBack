@@ -31,21 +31,28 @@ class AlertMessageController:
         El `payload` es el `entry` crudo de WhatsApp: `payload[msg_type]` trae
         `{id, mime_type, ...}` para image/audio/video/sticker.
         """
+        import logging as _logging
+        log = _logging.getLogger(__name__)
         if msg_type not in SUPPORTED_MEDIA_TYPES or not isinstance(payload, dict):
             return None, None
         media_info = payload.get(msg_type)
         if not isinstance(media_info, dict):
+            log.warning("media: type=%s pero payload['%s'] no es dict (keys=%s)", msg_type, msg_type, list(payload.keys()))
             return None, None
         media_id = media_info.get('id')
         if not media_id:
+            log.warning("media: type=%s sin id (media_info=%s)", msg_type, media_info)
             return None, None
         try:
             base = Config.WHATSAPP_SERVICE_URL.rstrip('/')
-            response = requests.get(f"{base}/media/{media_id}/download", timeout=60, stream=True)
+            url = f"{base}/media/{media_id}/download"
+            response = requests.get(url, timeout=60, stream=True)
             if response.status_code != 200:
+                log.warning("media: descarga fallo %s desde %s (body=%s)", response.status_code, url, response.text[:200])
                 return None, None
             content = response.content
             if not content or len(content) > MAX_MEDIA_BYTES:
+                log.warning("media: contenido inválido (len=%s)", len(content) if content else 0)
                 return None, None
             mime_type = (
                 media_info.get('mime_type')
@@ -58,8 +65,10 @@ class AlertMessageController:
                 content_type=mime_type,
                 metadata={'whatsapp_media_id': media_id, 'type': msg_type},
             )
+            log.info("media: guardada type=%s id=%s -> /api/mqtt-alerts/media/%s (%s bytes)", msg_type, media_id, file_id, len(content))
             return f"/api/mqtt-alerts/media/{file_id}", mime_type
-        except Exception:
+        except Exception as exc:
+            log.exception("media: excepción resolviendo type=%s id=%s: %s", msg_type, media_id, exc)
             return None, None
 
     # Etiquetas de la cita cuando el mensaje respondido no tiene texto.
@@ -322,6 +331,78 @@ class AlertMessageController:
                     if rec.get('wa_message_id'):
                         mapa[self._digits(rec.get('phone'))] = rec.get('wa_message_id')
             return jsonify({'success': True, 'map': mapa}), 200
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
+
+    def _publish_reaction(self, alert, message):
+        """Publica alert.message.reaction para que el panel actualice la burbuja."""
+        try:
+            empresa = EmpresaRepository().find_by_nombre(alert.empresa_nombre) if alert else None
+            publish_realtime_event({
+                'type': 'alert.message.reaction',
+                'empresaId': str(empresa._id) if empresa else None,
+                'entityId': str(message.alert_id),
+                'payload': {
+                    'alertId': str(message.alert_id),
+                    'messageId': str(message._id),
+                    'reactions': message.reactions,
+                },
+            })
+        except Exception:
+            pass
+
+    def apply_reaction(self, alert_id):
+        """POST /api/mqtt-alerts/<alert_id>/messages/reaction (interno, desde MQTTArisma).
+
+        Reacción entrante de WhatsApp: {wamid, actor_phone, actor_name, emoji}. Ubica el
+        mensaje por wamid y set/quita la reacción del actor. No se registra como mensaje.
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            wamid = data.get('wamid')
+            actor_phone = data.get('actor_phone')
+            actor_key = self._digits(actor_phone)
+            if not wamid or not actor_key:
+                return jsonify({'success': False, 'error': 'wamid y actor_phone requeridos'}), 400
+            message = self.repo.set_reaction_by_wa_id(alert_id, wamid, actor_key, data.get('emoji') or '', data.get('actor_name'))
+            if not message:
+                return jsonify({'success': False, 'error': 'Mensaje no encontrado'}), 404
+            alert = self.alert_repo.get_alert_by_id(alert_id)
+            self._publish_reaction(alert, message)
+            return jsonify({'success': True, 'reactions': message.reactions}), 200
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
+
+    def react_to_message(self, message_id):
+        """POST /api/mqtt-alerts/messages/<message_id>/react (desde el panel).
+
+        La empresa reacciona: {emoji} (vacío = quitar). Envía la reacción a cada contacto
+        (a su copia del mensaje) y guarda reactions["empresa"].
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            emoji = (data.get('emoji') or '').strip()
+            message = self.repo.find_by_id(message_id)
+            if not message:
+                return jsonify({'success': False, 'error': 'Mensaje no encontrado'}), 404
+            alert = self.alert_repo.get_alert_by_id(str(message.alert_id))
+            if not alert:
+                return jsonify({'success': False, 'error': 'Alerta no encontrada'}), 404
+
+            # Enviar la reacción por WhatsApp a cada contacto, a SU copia del mensaje.
+            contactos = alert.numeros_telefonicos if getattr(alert, 'numeros_telefonicos', None) else []
+            for contacto in contactos:
+                numero = (contacto or {}).get('numero') if isinstance(contacto, dict) else None
+                if not numero:
+                    continue
+                wamid = self._context_for_recipient(message, numero)
+                if wamid:
+                    whatsapp_client.send_reaction(numero, wamid, emoji)
+
+            nombre = (data.get('user_name') or alert.empresa_nombre or 'Empresa')
+            updated = self.repo.set_reaction_by_id(message_id, 'empresa', emoji, nombre)
+            self._publish_reaction(alert, updated or message)
+            return jsonify({'success': True, 'reactions': (updated or message).reactions}), 200
         except Exception as e:
             return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500
 

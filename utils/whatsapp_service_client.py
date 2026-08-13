@@ -11,7 +11,29 @@ class WhatsAppServiceClient:
         self.api_base_url = Config.WHATSAPP_SERVICE_URL
         self.broadcast_endpoint = f"{self.api_base_url}/send-broadcast-template"
         self.send_message_endpoint = f"{self.api_base_url}/send-message"
+        self.send_reaction_endpoint = f"{self.api_base_url}/send-reaction"
         self.timeout = Config.WHATSAPP_SERVICE_TIMEOUT
+
+    def send_reaction(self, phone, wa_message_id, emoji):
+        """Envía (o quita, con emoji='') una reacción a un mensaje por su wamid."""
+        if not self.api_base_url or not phone or not wa_message_id:
+            return {"success": False, "error": "phone y wa_message_id requeridos"}
+        try:
+            response = requests.post(
+                self.send_reaction_endpoint,
+                headers={"Content-Type": "application/json"},
+                json={"phone": phone, "message_id": wa_message_id, "emoji": emoji or ""},
+                timeout=self.timeout,
+            )
+            try:
+                result = response.json()
+            except json.JSONDecodeError:
+                return {"success": False, "error": f"Respuesta no válida ({response.status_code})"}
+            if 200 <= response.status_code < 300 and result.get("success"):
+                return {"success": True, "data": result.get("data")}
+            return {"success": False, "error": result.get("error", f"HTTP {response.status_code}")}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def send_text_message(self, phone, message, use_queue=False, context_message_id=None):
         """Envía un mensaje de texto libre a un número vía el servicio de WhatsApp.

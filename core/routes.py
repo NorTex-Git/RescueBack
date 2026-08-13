@@ -179,16 +179,6 @@ def update_physical_status_by_topic():
     """PUT /api/hardware/physical-status - Actualizar physical_status por empresa y hardware (token interno)"""
     return hardware_controller.update_physical_status_by_topic()
 
-@hardware_bp.route('/physical-status/check', methods=['POST'])
-def check_physical_status_stale():
-    """POST /api/hardware/physical-status/check - Marcar hardware con status vencido"""
-    return hardware_controller.check_physical_status_stale()
-
-@hardware_bp.route('/physical-status/sweep', methods=['POST'])
-def sweep_physical_status_stale():
-    """POST interno - Ejecutar el barrido global de estados fisicos vencidos."""
-    return hardware_controller.sweep_physical_status_stale()
-
 @hardware_bp.route('/all-including-inactive', methods=['GET'])
 def get_all_hardware_including_inactive():
     """GET /api/hardware/all-including-inactive - Obtener todos los hardware incluyendo inactivos"""
@@ -539,6 +529,16 @@ def add_alert_message_recipients(alert_id):
 def alert_message_context_map(alert_id):
     """GET /api/mqtt-alerts/<alert_id>/messages/context-map?wamid=<quoted> - Mapa phone->wamid del citado"""
     return alert_message_controller.get_context_map(alert_id)
+
+@mqtt_alert_bp.route('/<alert_id>/messages/reaction', methods=['POST'])
+def apply_alert_message_reaction(alert_id):
+    """POST /api/mqtt-alerts/<alert_id>/messages/reaction - Reacción entrante (desde MQTTArisma)"""
+    return alert_message_controller.apply_reaction(alert_id)
+
+@mqtt_alert_bp.route('/messages/<message_id>/react', methods=['POST'])
+def react_to_alert_message(message_id):
+    """POST /api/mqtt-alerts/messages/<message_id>/react - La empresa reacciona desde el panel"""
+    return alert_message_controller.react_to_message(message_id)
 
 # ========== BLUEPRINT DE BÚSQUEDA POR TELÉFONO ==========
 from controllers.phone_lookup_controller import PhoneLookupController

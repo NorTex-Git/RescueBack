@@ -85,6 +85,40 @@ class AlertMessageRepository:
     def _digits(value):
         return ''.join(ch for ch in str(value or '') if ch.isdigit())
 
+    def _apply_reaction(self, query, actor_key, emoji, name):
+        """Set/quita reactions[actor_key] en el doc que matchee query. Devuelve el msg o None."""
+        doc = self.collection.find_one(query)
+        if not doc:
+            return None
+        if emoji:
+            self.collection.update_one(
+                {'_id': doc['_id']},
+                {'$set': {f'reactions.{actor_key}': {'emoji': emoji, 'name': name or ''}}},
+            )
+        else:
+            self.collection.update_one({'_id': doc['_id']}, {'$unset': {f'reactions.{actor_key}': ''}})
+        return self.find_by_id(doc['_id'])
+
+    def set_reaction_by_wa_id(self, alert_id, wa_message_id, actor_key, emoji, name):
+        """Reacción entrante: ubica el mensaje por wamid (propio o de un contacto)."""
+        if not wa_message_id or not actor_key:
+            return None
+        query = {
+            'alert_id': self._coerce_alert_id(alert_id),
+            '$or': [{'wa_message_id': wa_message_id}, {'wa_recipients.wa_message_id': wa_message_id}],
+        }
+        return self._apply_reaction(query, actor_key, emoji, name)
+
+    def set_reaction_by_id(self, message_id, actor_key, emoji, name):
+        """Reacción saliente (empresa): ubica el mensaje por su _id interno."""
+        if not actor_key:
+            return None
+        try:
+            query = {'_id': ObjectId(message_id)}
+        except Exception:
+            query = {'_id': message_id}
+        return self._apply_reaction(query, actor_key, emoji, name)
+
     def find_by_alert(self, alert_id, direction=None, limit=15, include_templates=False, include_navigation=False):
         """Devuelve los últimos `limit` mensajes ordenados por fecha asc para mostrar al usuario."""
         query = {'alert_id': self._coerce_alert_id(alert_id)}

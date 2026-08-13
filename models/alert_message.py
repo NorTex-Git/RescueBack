@@ -12,7 +12,7 @@ class AlertMessage:
                  body=None, payload=None, user_id=None, user_name=None,
                  user_role=None, is_template=False, is_navigation=False,
                  fecha=None, media_url=None, mime_type=None,
-                 wa_message_id=None, wa_recipients=None, reply_to=None, _id=None):
+                 wa_message_id=None, wa_recipients=None, reply_to=None, reactions=None, _id=None):
         self._id = _id or ObjectId()
         self.alert_id = alert_id
         self.phone = phone
@@ -36,6 +36,8 @@ class AlertMessage:
         self.wa_message_id = wa_message_id
         self.wa_recipients = wa_recipients or []
         self.reply_to = reply_to
+        # Reacciones: {actor_key: {emoji, name}}. actor_key = digits(phone) o "empresa".
+        self.reactions = reactions or {}
 
     def to_dict(self):
         return {
@@ -56,7 +58,8 @@ class AlertMessage:
             'mime_type': self.mime_type,
             'wa_message_id': self.wa_message_id,
             'wa_recipients': self.wa_recipients,
-            'reply_to': self.reply_to
+            'reply_to': self.reply_to,
+            'reactions': self.reactions
         }
 
     def to_json(self):
@@ -78,7 +81,8 @@ class AlertMessage:
             'mime_type': self.mime_type,
             'wa_message_id': self.wa_message_id,
             'wa_recipients': self.wa_recipients,
-            'reply_to': self.reply_to
+            'reply_to': self.reply_to,
+            'reactions': self.reactions
         }
 
     @classmethod
@@ -103,5 +107,6 @@ class AlertMessage:
             mime_type=data.get('mime_type'),
             wa_message_id=data.get('wa_message_id'),
             wa_recipients=data.get('wa_recipients'),
-            reply_to=data.get('reply_to')
+            reply_to=data.get('reply_to'),
+            reactions=data.get('reactions')
         )

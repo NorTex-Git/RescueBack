@@ -100,9 +100,14 @@ class AlertMessageController:
             if not telefonos:
                 return jsonify({'success': False, 'error': 'La alerta no tiene contactos a quienes escribir'}), 400
 
+            # Titular del mensaje que llega por WhatsApp = nombre de la empresa (en
+            # negrita como primera línea; el texto libre de WhatsApp no tiene header).
+            titular = (data.get('user_name') or alert.empresa_nombre or '').strip()
+            whatsapp_body = f"*{titular}*\n{body}" if titular else body
+
             enviados, fallidos = [], []
             for numero in telefonos:
-                result = whatsapp_client.send_text_message(numero, body)
+                result = whatsapp_client.send_text_message(numero, whatsapp_body)
                 (enviados if result.get('success') else fallidos).append({
                     'numero': numero,
                     'error': None if result.get('success') else result.get('error'),

@@ -396,36 +396,44 @@ class HardwareService:
             stale_seconds = Config.HARDWARE_STATUS_STALE_SECONDS
             now = datetime.utcnow()
 
+            # Se incluye el hardware deshabilitado (activa=False): no puede estar "vivo",
+            # así que también se normaliza a Inactivo (antes se saltaba y quedaba pegado
+            # con un estado 'Activo' viejo).
             if empresa_id:
-                hardware_list = self.hardware_repo.find_by_empresa(empresa_id)
+                hardware_list = self.hardware_repo.find_by_empresa_including_inactive(empresa_id)
             else:
-                hardware_list = self.hardware_repo.find_all()
+                hardware_list = self.hardware_repo.find_all_including_inactive()
 
             updated_hardware = []
             for hardware in hardware_list:
-                if not hardware.activa:
-                    continue
                 tipo = (hardware.tipo or '').upper()
                 if tipo in excluded_types:
                     continue
 
                 physical_status = hardware.physical_status or {}
                 estado_actual = physical_status.get('estado')
-                updated_at = physical_status.get('updated_at')
-                last_update = None
-                if isinstance(updated_at, str):
-                    try:
-                        last_update = datetime.fromisoformat(updated_at)
-                        if last_update.tzinfo is not None:
-                            last_update = last_update.astimezone(timezone.utc).replace(tzinfo=None)
-                    except ValueError:
-                        last_update = None
-
-                is_stale = not last_update or (now - last_update) > timedelta(seconds=stale_seconds)
                 normalized_state = estado_actual.strip().lower() if isinstance(estado_actual, str) else ''
-                should_be_inactive = normalized_state == 'desactivado' or is_stale
-                if not should_be_inactive or normalized_state == 'inactivo':
-                    continue
+
+                if not hardware.activa:
+                    # Deshabilitado por admin: nunca debe aparecer activo. Se fuerza Inactivo
+                    # salvo que ya lo esté.
+                    if normalized_state == 'inactivo':
+                        continue
+                else:
+                    updated_at = physical_status.get('updated_at')
+                    last_update = None
+                    if isinstance(updated_at, str):
+                        try:
+                            last_update = datetime.fromisoformat(updated_at)
+                            if last_update.tzinfo is not None:
+                                last_update = last_update.astimezone(timezone.utc).replace(tzinfo=None)
+                        except ValueError:
+                            last_update = None
+
+                    is_stale = not last_update or (now - last_update) > timedelta(seconds=stale_seconds)
+                    should_be_inactive = normalized_state == 'desactivado' or is_stale
+                    if not should_be_inactive or normalized_state == 'inactivo':
+                        continue
                 physical_status['estado'] = 'Inactivo'
                 updated = self.hardware_repo.update_physical_status_by_id(hardware._id, physical_status)
                 if updated:

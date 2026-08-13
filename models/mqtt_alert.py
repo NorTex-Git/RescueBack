@@ -153,23 +153,25 @@ class MqttAlert:
             'mensaje_desactivacion': self.mensaje_desactivacion
         }
     
-    def deactivate(self, desactivado_por_id=None, desactivado_por_tipo=None, mensaje_desactivacion=None):
+    def deactivate(self, desactivado_por_id=None, desactivado_por_tipo=None, mensaje_desactivacion=None, desactivado_por_nombre=None):
         """Desactiva la alerta"""
         self.activo = False
         self.fecha_desactivacion = datetime.utcnow()
-        
+
         # Agregar mensaje de desactivación si se proporciona
         if mensaje_desactivacion:
             self.mensaje_desactivacion = mensaje_desactivacion.strip()
-        
-        # Agregar información sobre quién desactivó
+
+        # Agregar información sobre quién desactivó. Se persiste el nombre para que
+        # el frontend pueda mostrar "Desactivada por" sin resolver el id.
         if desactivado_por_id and desactivado_por_tipo:
             self.desactivado_por = {
                 'id': desactivado_por_id,
                 'tipo': desactivado_por_tipo,
+                'nombre': desactivado_por_nombre or '',
                 'fecha_desactivacion': self.fecha_desactivacion.isoformat()
             }
-        
+
         self.update_timestamp()
     
     def activate(self):

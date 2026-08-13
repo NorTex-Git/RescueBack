@@ -1141,16 +1141,26 @@ class MqttAlertController:
                 for alert in result['data']:
                     alert_dict = dict(alert) if isinstance(alert, dict) else {}
                     
-                    # Contar contactos - necesitamos buscar en la data para números telefónicos
-                    contactos_count = 0
-                    if isinstance(alert_dict.get('data'), dict):
+                    # Contar contactos. to_json() guarda numeros_telefonicos en el
+                    # nivel superior; se mantiene el fallback a data por compatibilidad.
+                    numeros = alert_dict.get('numeros_telefonicos')
+                    if not numeros and isinstance(alert_dict.get('data'), dict):
                         numeros = alert_dict['data'].get('numeros_telefonicos', [])
-                        contactos_count = len(numeros) if numeros else 0
-                    
+                    contactos_count = len(numeros) if isinstance(numeros, list) else 0
+
+                    # hardware_nombre no viaja en to_json(): derivarlo sólo cuando la
+                    # activación es de hardware (no confundir con el nombre del creador
+                    # en alertas de usuario/empresa) o desde data.
+                    activacion = alert_dict.get('activacion_alerta') if isinstance(alert_dict.get('activacion_alerta'), dict) else {}
+                    data_dict = alert_dict.get('data') if isinstance(alert_dict.get('data'), dict) else {}
+                    hardware_nombre = alert_dict.get('hardware_nombre') or data_dict.get('hardware_nombre')
+                    if not hardware_nombre and activacion.get('tipo_activacion') == 'hardware':
+                        hardware_nombre = activacion.get('nombre')
+
                     transformed_alert = {
                         **alert_dict,
                         "_id": str(alert_dict.get('_id', '')),
-                        "hardware_nombre": alert_dict.get('hardware_nombre'),
+                        "hardware_nombre": hardware_nombre,
                         "prioridad": alert_dict.get('prioridad', 'media'),
                         "activo": bool(alert_dict.get('activo', True)),
                         "empresa_nombre": alert_dict.get('empresa_nombre'),
@@ -1893,12 +1903,32 @@ class MqttAlertController:
             else:
                 print(f"⚠️ Empresa '{alert.empresa_nombre}' no encontrada: sin topics para desactivar")
 
+            # Resolver el nombre legible de quien desactiva para persistirlo en la
+            # alerta (antes sólo viajaba por MQTT y el historial no lo mostraba).
+            desactivado_por_nombre = ''
+            if desactivado_por_tipo == 'empresa':
+                desactivado_por_nombre = alert.empresa_nombre or ''
+            elif desactivado_por_tipo == 'usuario':
+                try:
+                    usuario_doc = self.service.alert_repo.db.usuarios.find_one(
+                        {'_id': ObjectId(desactivado_por_id)}, {'nombre': 1}
+                    )
+                    if usuario_doc:
+                        desactivado_por_nombre = usuario_doc.get('nombre', '') or ''
+                except Exception:
+                    desactivado_por_nombre = ''
+
             # Desactivar con información de quien desactiva
-            alert.deactivate(desactivado_por_id=desactivado_por_id, desactivado_por_tipo=desactivado_por_tipo, mensaje_desactivacion=mensaje_desactivacion)
-            
+            alert.deactivate(
+                desactivado_por_id=desactivado_por_id,
+                desactivado_por_tipo=desactivado_por_tipo,
+                mensaje_desactivacion=mensaje_desactivacion,
+                desactivado_por_nombre=desactivado_por_nombre,
+            )
+
             # Actualizar en base de datos
             success = self.service.alert_repo.update_alert(alert_id, alert)
-            
+
             if success:
                 # Excluir al que desactiva del payload de managers (si es manager, ya recibió aviso)
                 alert_managers_payload = self._build_alert_managers_payload(
@@ -1908,7 +1938,7 @@ class MqttAlertController:
                 desactivado_por_payload = {
                     'id': desactivado_por_id,
                     'tipo': desactivado_por_tipo,
-                    'nombre': alert.empresa_nombre if desactivado_por_tipo == 'empresa' else '',
+                    'nombre': desactivado_por_nombre,
                     'fecha_desactivacion': alert.fecha_desactivacion.isoformat()
                 }
 

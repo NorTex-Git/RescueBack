@@ -1,3 +1,5 @@
+import threading
+
 import requests
 from flask import Response, jsonify, request
 
@@ -70,6 +72,45 @@ class AlertMessageController:
         except Exception as exc:
             log.exception("media: excepción resolviendo type=%s id=%s: %s", msg_type, media_id, exc)
             return None, None
+
+    @staticmethod
+    def _pending_media_info(msg_type, payload):
+        """(media_id, mime_type) si el mensaje es media soportada con id; si no (None, None).
+
+        No descarga nada: solo lee el payload para registrar el mensaje como "cargando".
+        """
+        if msg_type not in SUPPORTED_MEDIA_TYPES or not isinstance(payload, dict):
+            return None, None
+        info = payload.get(msg_type)
+        if not isinstance(info, dict):
+            return None, None
+        media_id = info.get('id')
+        if not media_id:
+            return None, None
+        return media_id, info.get('mime_type')
+
+    def _resolve_media_async(self, message_id, alert_id, empresa_id, msg_type, payload):
+        """Descarga la media en segundo plano y avisa al panel cuando esté lista.
+
+        El mensaje ya se registró y publicó como "cargando"; aquí se resuelve sin
+        bloquear la respuesta y se emite `alert.message.updated` para intercambiar el
+        placeholder por la media real (o quitar el "cargando" si la descarga falla).
+        """
+        def _run():
+            try:
+                media_url, mime_type = self._resolve_media(msg_type, payload)
+                updated = self.repo.set_media(message_id, media_url, mime_type)
+                if updated:
+                    publish_realtime_event({
+                        'type': 'alert.message.updated',
+                        'empresaId': empresa_id,
+                        'entityId': str(alert_id),
+                        'payload': {'alertId': str(alert_id), 'message': updated.to_json()},
+                    })
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
 
     # Etiquetas de la cita cuando el mensaje respondido no tiene texto.
     MEDIA_LABELS = {
@@ -145,9 +186,11 @@ class AlertMessageController:
 
             msg_type = data.get('type', 'text')
             payload = data.get('payload') or {}
-            # Descargar y guardar la media (imagen/audio/video/sticker) para poder
-            # mostrarla en el panel; documentos y texto no pasan por aquí.
-            media_url, mime_type = self._resolve_media(msg_type, payload)
+            # Media (imagen/audio/video/sticker): NO se descarga aquí. Se registra el
+            # mensaje al instante como "cargando" (media_pending) para que aparezca sin
+            # delay; la descarga corre en segundo plano y luego se actualiza la burbuja.
+            pending_media_id, pending_mime = self._pending_media_info(msg_type, payload)
+            is_media = bool(pending_media_id)
 
             # Threading: wamid propio y, si es respuesta, cita del mensaje respondido.
             wa_message_id = payload.get('id') if isinstance(payload, dict) else None
@@ -169,8 +212,9 @@ class AlertMessageController:
                 user_role=data.get('user_role', ''),
                 is_template=bool(data.get('is_template', False)),
                 is_navigation=bool(data.get('is_navigation', False)),
-                media_url=media_url,
-                mime_type=mime_type,
+                media_url=None,
+                mime_type=pending_mime if is_media else None,
+                media_pending=is_media,
                 wa_message_id=wa_message_id,
                 reply_to=reply_to
             )
@@ -178,15 +222,19 @@ class AlertMessageController:
             created_data = created.to_json()
             if not created.is_template and not created.is_navigation:
                 empresa = EmpresaRepository().find_by_nombre(alert.empresa_nombre)
+                empresa_id = str(empresa._id) if empresa else None
                 publish_realtime_event({
                     'type': 'alert.message.created',
-                    'empresaId': str(empresa._id) if empresa else None,
+                    'empresaId': empresa_id,
                     'entityId': str(alert._id),
                     'payload': {
                         'alertId': str(alert._id),
                         'message': created_data,
                     },
                 })
+                # Descargar la media en segundo plano y avisar cuando esté lista.
+                if is_media:
+                    self._resolve_media_async(str(created._id), alert._id, empresa_id, msg_type, payload)
             return jsonify({'success': True, 'message': created_data}), 201
         except Exception as e:
             return jsonify({'success': False, 'error': 'Error interno', 'message': str(e)}), 500

@@ -38,6 +38,18 @@ class AlertMessageRepository:
             doc = self.collection.find_one({'_id': message_id})
         return AlertMessage.from_dict(doc) if doc else None
 
+    def set_media(self, message_id, media_url, mime_type):
+        """Marca la media como resuelta (o fallida) tras la descarga en segundo plano."""
+        try:
+            oid = ObjectId(message_id)
+        except Exception:
+            oid = message_id
+        self.collection.update_one(
+            {'_id': oid},
+            {'$set': {'media_url': media_url, 'mime_type': mime_type, 'media_pending': False}},
+        )
+        return self.find_by_id(oid)
+
     def find_by_wa_id(self, alert_id, wa_message_id):
         """Busca un mensaje por su wamid dentro de una alerta.
 

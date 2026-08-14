@@ -12,7 +12,8 @@ class AlertMessage:
                  body=None, payload=None, user_id=None, user_name=None,
                  user_role=None, is_template=False, is_navigation=False,
                  fecha=None, media_url=None, mime_type=None,
-                 wa_message_id=None, wa_recipients=None, reply_to=None, reactions=None, _id=None):
+                 wa_message_id=None, wa_recipients=None, reply_to=None, reactions=None,
+                 media_pending=False, _id=None):
         self._id = _id or ObjectId()
         self.alert_id = alert_id
         self.phone = phone
@@ -29,6 +30,8 @@ class AlertMessage:
         # Media descargada de WhatsApp y servida por RescueBack (imagen/audio/video/sticker).
         self.media_url = media_url
         self.mime_type = mime_type
+        # True mientras la media se descarga en segundo plano (el panel muestra "cargando").
+        self.media_pending = bool(media_pending)
         # Threading: id de mensaje de WhatsApp (wamid) y cita del mensaje respondido.
         # Entrante: `wa_message_id` (uno). Saliente al grupo: `wa_recipients` con un
         # {phone, wa_message_id} por contacto (WhatsApp es 1:1, cada uno recibe su wamid),
@@ -56,6 +59,7 @@ class AlertMessage:
             'fecha': self.fecha,
             'media_url': self.media_url,
             'mime_type': self.mime_type,
+            'media_pending': self.media_pending,
             'wa_message_id': self.wa_message_id,
             'wa_recipients': self.wa_recipients,
             'reply_to': self.reply_to,
@@ -79,6 +83,7 @@ class AlertMessage:
             'fecha': self.fecha.isoformat() if isinstance(self.fecha, datetime) else self.fecha,
             'media_url': self.media_url,
             'mime_type': self.mime_type,
+            'media_pending': self.media_pending,
             'wa_message_id': self.wa_message_id,
             'wa_recipients': self.wa_recipients,
             'reply_to': self.reply_to,
@@ -105,6 +110,7 @@ class AlertMessage:
             fecha=data.get('fecha'),
             media_url=data.get('media_url'),
             mime_type=data.get('mime_type'),
+            media_pending=data.get('media_pending', False),
             wa_message_id=data.get('wa_message_id'),
             wa_recipients=data.get('wa_recipients'),
             reply_to=data.get('reply_to'),

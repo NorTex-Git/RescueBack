@@ -722,6 +722,13 @@ class MqttAlertController:
             elif not image_alert and tipo_alarma_payload:
                 image_alert = tipo_alarma_payload.get('imagen_base64')
 
+            # Sonido del tipo de alerta (para reproducir en el panel al llegar).
+            sonido_link = alert_data.get('sonido_link')
+            if not sonido_link and tipo_alarma_info and getattr(tipo_alarma_info, 'sonido_link', None):
+                sonido_link = tipo_alarma_info.sonido_link
+            elif not sonido_link and tipo_alarma_payload:
+                sonido_link = tipo_alarma_payload.get('sonido_link')
+
             elementos_necesarios = alert_data.get('elementos_necesarios') or []
             instrucciones = alert_data.get('instrucciones') or []
             if not elementos_necesarios:
@@ -755,6 +762,7 @@ class MqttAlertController:
                 descripcion=alert_data.get('descripcion', f'Alerta generada por {hardware.nombre}'),
                 prioridad=prioridad_alerta,
                 image_alert=image_alert,
+                sonido_link=sonido_link,
                 elementos_necesarios=elementos_necesarios,
                 instrucciones=instrucciones,
                 data=alert_data,
@@ -1551,6 +1559,13 @@ class MqttAlertController:
             elif not image_alert and tipo_alarma_payload and tipo_alarma_payload.get('imagen_base64'):
                 image_alert = tipo_alarma_payload.get('imagen_base64')
 
+            # Sonido del tipo de alerta (para reproducir en el panel al llegar).
+            sonido_link = data.get('sonido_link')
+            if not sonido_link and tipo_alarma_info and getattr(tipo_alarma_info, 'sonido_link', None):
+                sonido_link = tipo_alarma_info.sonido_link
+            elif not sonido_link and tipo_alarma_payload and tipo_alarma_payload.get('sonido_link'):
+                sonido_link = tipo_alarma_payload.get('sonido_link')
+
             # Obtener elementos necesarios e instrucciones desde tipo_alarma_info si existe
             elementos_necesarios = data.get('elementos_necesarios') or data_adicional.get('elementos_necesarios') or []
             instrucciones = data.get('instrucciones') or data_adicional.get('instrucciones') or []
@@ -1584,6 +1599,7 @@ class MqttAlertController:
                 descripcion=descripcion,
                 prioridad=prioridad,
                 image_alert=image_alert,
+                sonido_link=sonido_link,
                 elementos_necesarios=elementos_necesarios,
                 instrucciones=instrucciones,
                 data=data_adicional,

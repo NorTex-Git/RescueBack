@@ -10,6 +10,7 @@ class MqttAlert:
                  descripcion=None,
                  prioridad=None,
                  image_alert=None,
+                 sonido_link=None,
                  elementos_necesarios=None,
                  instrucciones=None,
                  numeros_telefonicos=None, 
@@ -31,6 +32,7 @@ class MqttAlert:
         self.descripcion = descripcion
         self.prioridad = prioridad or 'media'
         self.image_alert = image_alert  # imagen de la alerta (base64 o URL)
+        self.sonido_link = sonido_link  # sonido del tipo de alerta (URL) para reproducir al llegar
         self.elementos_necesarios = elementos_necesarios or []  # implementos necesarios del tipo de alarma
         self.instrucciones = instrucciones or []  # recomendaciones del tipo de alarma
         
@@ -64,6 +66,7 @@ class MqttAlert:
             'descripcion': self.descripcion,
             'prioridad': self.prioridad,
             'image_alert': self.image_alert,
+            'sonido_link': self.sonido_link,
             'elementos_necesarios': self.elementos_necesarios,
             'instrucciones': self.instrucciones,
             'numeros_telefonicos': self.numeros_telefonicos,
@@ -95,6 +98,7 @@ class MqttAlert:
         alert.descripcion = data.get('descripcion')
         alert.prioridad = data.get('prioridad', 'media')
         alert.image_alert = data.get('image_alert')
+        alert.sonido_link = data.get('sonido_link')
         alert.elementos_necesarios = data.get('elementos_necesarios', [])
         alert.instrucciones = data.get('instrucciones', [])
         alert.numeros_telefonicos = data.get('numeros_telefonicos', [])
@@ -138,6 +142,7 @@ class MqttAlert:
             'descripcion': self.descripcion,
             'prioridad': self.prioridad,
             'image_alert': self.image_alert,
+            'sonido_link': self.sonido_link,
             'elementos_necesarios': self.elementos_necesarios,
             'instrucciones': self.instrucciones,
             'numeros_telefonicos': self.numeros_telefonicos,

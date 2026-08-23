@@ -1,5 +1,6 @@
 from bson import ObjectId
 from datetime import datetime
+import re
 from core.database import Database
 from models.empresa import Empresa
 
@@ -10,6 +11,24 @@ class EmpresaRepository:
         # Crear índices necesarios
         self._create_indexes()
     
+    @staticmethod
+    def _duplicate_error_message(error):
+        details = getattr(error, 'details', None) or {}
+        key_pattern = details.get('keyPattern') or {}
+        if 'username' in key_pattern:
+            return "El nombre de usuario ya está en uso"
+        if 'email' in key_pattern:
+            return "El correo ya está en uso"
+        if 'nombre' in key_pattern:
+            return "Ya existe una empresa con ese nombre"
+
+        message = str(error).lower()
+        if 'username_1' in message:
+            return "El nombre de usuario ya está en uso"
+        if 'email_1' in message:
+            return "El correo ya está en uso"
+        return "Ya existe una empresa con ese nombre"
+
     def _create_indexes(self):
         """Crea los índices necesarios para la colección"""
         try:
@@ -44,7 +63,7 @@ class EmpresaRepository:
         except Exception as e:
             # Verificar si es error de duplicado
             if "duplicate key error" in str(e).lower() or "11000" in str(e):
-                raise Exception("Ya existe una empresa con ese nombre")
+                raise Exception(self._duplicate_error_message(e))
             raise Exception(f"Error creando empresa: {str(e)}")
     
     def find_by_id(self, empresa_id):
@@ -88,8 +107,9 @@ class EmpresaRepository:
     def find_by_nombre(self, nombre):
         """Busca una empresa por nombre (case-insensitive)"""
         try:
+            normalized_name = (nombre or '').strip()
             empresa_data = self.collection.find_one(
-                {"nombre": {"$regex": f"^{nombre}$", "$options": "i"}, "activa": True}
+                {"nombre": {"$regex": f"^{re.escape(normalized_name)}$", "$options": "i"}}
             )
             if empresa_data:
                 return Empresa.from_dict(empresa_data)
@@ -104,8 +124,7 @@ class EmpresaRepository:
                 exclude_id = ObjectId(exclude_id)
                 
             empresa_data = self.collection.find_one({
-                "nombre": {"$regex": f"^{nombre}$", "$options": "i"}, 
-                "activa": True,
+                "nombre": {"$regex": f"^{re.escape((nombre or '').strip())}$", "$options": "i"},
                 "_id": {"$ne": exclude_id}
             })
             if empresa_data:
@@ -117,7 +136,7 @@ class EmpresaRepository:
     def find_by_username(self, username):
         """Busca una empresa por username"""
         try:
-            data = self.collection.find_one({"username": username, "activa": True})
+            data = self.collection.find_one({"username": username})
             return Empresa.from_dict(data) if data else None
         except Exception as e:
             raise Exception(f"Error buscando empresa por username: {str(e)}")
@@ -129,8 +148,7 @@ class EmpresaRepository:
                 exclude_id = ObjectId(exclude_id)
                 
             data = self.collection.find_one({
-                "username": username, 
-                "activa": True,
+                "username": username,
                 "_id": {"$ne": exclude_id}
             })
             return Empresa.from_dict(data) if data else None
@@ -140,7 +158,7 @@ class EmpresaRepository:
     def find_by_email(self, email):
         """Busca una empresa por email"""
         try:
-            data = self.collection.find_one({"email": email, "activa": True})
+            data = self.collection.find_one({"email": email})
             return Empresa.from_dict(data) if data else None
         except Exception as e:
             raise Exception(f"Error buscando empresa por email: {str(e)}")
@@ -152,8 +170,7 @@ class EmpresaRepository:
                 exclude_id = ObjectId(exclude_id)
                 
             data = self.collection.find_one({
-                "email": email, 
-                "activa": True,
+                "email": email,
                 "_id": {"$ne": exclude_id}
             })
             return Empresa.from_dict(data) if data else None
@@ -200,7 +217,7 @@ class EmpresaRepository:
             return None
         except Exception as e:
             if "duplicate key error" in str(e).lower() or "11000" in str(e):
-                raise Exception("Ya existe una empresa con ese nombre")
+                raise Exception(self._duplicate_error_message(e))
             raise Exception(f"Error actualizando empresa: {str(e)}")
     
     def soft_delete(self, empresa_id):

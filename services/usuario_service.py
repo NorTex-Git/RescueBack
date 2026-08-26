@@ -422,9 +422,12 @@ class UsuarioService:
                     }
             
             # Actualizar usuario
+            telefono_anterior = str(existing_usuario.telefono).strip() if existing_usuario.telefono else None
+            telefono_actualizado = str(updated_usuario.telefono).strip() if updated_usuario.telefono else None
             result = self.usuario_repository.update(usuario_id, updated_usuario)
             if result:
-                self._delete_whatsapp_number(result.telefono)
+                if telefono_anterior and telefono_anterior != telefono_actualizado:
+                    self._delete_whatsapp_number(telefono_anterior)
                 response_data = result.to_json()
                 empresa = self.empresa_repository.find_by_id(result.empresa_id)
                 response_data['empresa'] = {
